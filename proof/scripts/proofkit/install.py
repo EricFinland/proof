@@ -13,8 +13,7 @@ def _load(p: Path) -> dict:
     return {}
 
 def _entry(trigger_path: str) -> dict:
-    cmd = f'{json.dumps(sys.executable)} {json.dumps(trigger_path)}'.replace('"', '')
-    return {"hooks": [{"type": "command", "command": f'python "{trigger_path}"'}]}
+    return {"hooks": [{"type": "command", "command": f'"{sys.executable}" "{trigger_path}"'}]}
 
 def arm(settings_path: Path, trigger_path: str) -> None:
     settings_path = Path(settings_path)
@@ -28,6 +27,7 @@ def arm(settings_path: Path, trigger_path: str) -> None:
 
 def disarm(settings_path: Path) -> None:
     settings_path = Path(settings_path)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
     data = _load(settings_path)
     stop = data.get("hooks", {}).get("Stop", [])
     data.setdefault("hooks", {})["Stop"] = [h for h in stop if MARK not in json.dumps(h)]
