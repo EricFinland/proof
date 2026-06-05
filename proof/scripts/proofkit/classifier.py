@@ -3,22 +3,48 @@ import re
 from dataclasses import dataclass, field
 
 # Assertive completion signals. Word-boundary, case-insensitive.
+# These are phrase-anchored to avoid false positives on incidental words.
 CLAIM_PATTERNS = [
+    # Test/build signals
     r"\btests?\s+(?:are\s+)?pass(?:ing|ed|es)?\b",
     r"\ball\s+tests?\s+pass\b",
     r"\bbuild\s+is\s+(?:clean|green|passing)\b",
+    # "works now" — requires "now" to anchor completion
     r"\b(?:it|everything|this)\s+works?\s+now\b",
     r"\bworks?\s+now\b",
-    r"\b(?:all\s+)?(?:set|done)\b",
-    r"\bfixed\b",
-    r"\bcomplete(?:d|ly)?\b",
-    r"\bdeployed\b",
-    r"\bverified\b",
-    r"\bshould\s+work\b",
+    # "all set" as a phrase (not bare "set")
+    r"\ball\s+set\b",
+    # "done" only as standalone completion: "all done", "we're done", sentence-final "done."
+    # NOT "done button", "not done", "done yet"
+    r"\ball\s+done\b",
+    r"\b(?:we'?re|i'?m)\s+done\b",
+    # Phrase-anchored "fixed"
+    r"\b(?:bug|issue|it|that|the\s+\w+)\s+is\s+(?:now\s+)?fixed\b",
+    r"\bnow\s+fixed\b",
+    r"\bi'?ve\s+fixed\b",
+    r"\bi\s+fixed\s+the\b",
+    # "complete" only in assertive contexts
+    r"\bfeature\s+is\s+complete\b",
+    r"\bsuccessfully\s+\w+ed\b",
+    # Deployment
+    r"\bdeployed\s+successfully\b",
+    r"\bdeployed\b(?!\s+to\s+\w)",   # "deployed" not "deployed to staging" but keep simple
+    # HTTP success signal
     r"\breturns?\s+200\b",
 ]
-# Phrases that negate a nearby claim (questions, future intent).
-NEGATORS = [r"\?\s*$", r"\blet me\b", r"\bi'?m\s+working\b", r"\bmight\b", r"\binvestigate\b"]
+
+# Patterns that, when matched, cancel a CLAIM_PATTERNS hit.
+# Applied BEFORE pattern matching.
+NEGATORS = [
+    r"\?\s*$",           # ends with a question
+    r"\blet me\b",
+    r"\bi'?m\s+working\b",
+    r"\bmight\b",
+    r"\binvestigate\b",
+    r"\bnot\s+done\b",   # "not done yet"
+    r"\bnot\s+deployed\b",
+    r"\bbeing\s+deployed\b",
+]
 
 @dataclass
 class ClaimResult:

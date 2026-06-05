@@ -15,6 +15,14 @@ NEGATIVE = [
     "This might break if the input is empty.",
     "Let me investigate why the build is red.",
     "",
+    # New negatives — must NOT trigger
+    "I fixed a typo in the comment.",
+    "The done button is broken.",
+    "Not done yet.",
+    "It is set to debug mode.",
+    "Status: complete with errors.",
+    "Here is the verified list.",
+    "Should work eventually.",
 ]
 
 @pytest.mark.parametrize("msg", POSITIVE)
