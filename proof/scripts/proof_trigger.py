@@ -18,24 +18,25 @@ DIRECTIVE = (
 def main():
     try:
         payload = json.load(sys.stdin)
+        if payload.get("stop_hook_active"):
+            return
+        tp = payload.get("transcript_path", "")
+        session = payload.get("session_id", "unknown")
+        root = os.environ.get("PROOF_HOME")  # tests inject; prod uses default (~/.proof)
+        msg = last_assistant_text(tp)
+        if not detect_claim(msg).is_claim:
+            return
+        if already_verified(session, msg, root=root):
+            return
+        mark_verified(session, msg, root=root)
+        script = Path(__file__).resolve().parent.joinpath("proof.py").as_posix()
+        tp_posix = Path(tp).as_posix() if tp else ""
+        print(json.dumps({
+            "decision": "block",
+            "reason": DIRECTIVE.format(script=script, tp=tp_posix),
+        }))
     except Exception:
         return  # never break a turn on hook error
-    if payload.get("stop_hook_active"):
-        return
-    tp = payload.get("transcript_path", "")
-    session = payload.get("session_id", "unknown")
-    root = os.environ.get("PROOF_HOME")  # tests inject; prod uses default (~/.proof)
-    msg = last_assistant_text(tp)
-    if not detect_claim(msg).is_claim:
-        return
-    if already_verified(session, msg, root=root):
-        return
-    mark_verified(session, msg, root=root)
-    script = str(Path(__file__).resolve().parent / "proof.py")
-    print(json.dumps({
-        "decision": "block",
-        "reason": DIRECTIVE.format(script=script, tp=tp),
-    }))
 
 if __name__ == "__main__":
     main()
