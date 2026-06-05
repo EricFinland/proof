@@ -41,3 +41,15 @@ def test_verifies_claim_only_once(tmp_path):
     second = _run({"session_id": "s1", "transcript_path": tp, "stop_hook_active": False}, home)
     assert json.loads(first.stdout)["decision"] == "block"
     assert second.stdout.strip() == ""
+
+def test_missing_transcript_path_is_silent(tmp_path):
+    """Payload missing transcript_path must produce empty stdout and exit 0."""
+    r = _run({"session_id": "s1", "stop_hook_active": False}, tmp_path / "home")
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+def test_transcript_path_is_directory_is_silent(tmp_path):
+    """transcript_path pointing to a directory must no-op cleanly."""
+    r = _run({"session_id": "s1", "transcript_path": str(tmp_path), "stop_hook_active": False}, tmp_path / "home")
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""

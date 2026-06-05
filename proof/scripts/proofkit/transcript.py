@@ -16,7 +16,7 @@ def _text_of(entry: dict) -> str:
 
 def last_assistant_text(transcript_path: str) -> str:
     p = Path(transcript_path)
-    if not p.exists():
+    if not p.is_file():
         return ""
     last = ""
     for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
