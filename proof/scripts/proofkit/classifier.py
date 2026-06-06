@@ -25,10 +25,11 @@ CLAIM_PATTERNS = [
     r"\bi\s+fixed\s+the\b",
     # "complete" only in assertive contexts
     r"\bfeature\s+is\s+complete\b",
-    r"\bsuccessfully\s+\w+ed\b",
+    # "successfully" only with a meaningful completion-scope verb
+    r"\bsuccessfully\s+(?:deployed|installed|migrated|completed|finished|built|published|released)\b",
     # Deployment
     r"\bdeployed\s+successfully\b",
-    r"\bdeployed\b(?!\s+to\s+\w)",   # "deployed" not "deployed to staging" but keep simple
+    r"\bdeployed\b",   # "deployed to production", "deployed successfully", etc. (future/passive blocked by NEGATORS)
     # HTTP success signal
     r"\breturns?\s+200\b",
 ]
@@ -44,6 +45,8 @@ NEGATORS = [
     r"\bnot\s+done\b",   # "not done yet"
     r"\bnot\s+deployed\b",
     r"\bbeing\s+deployed\b",
+    r"\bwill\s+be\s+deployed\b",   # future: "will be deployed to X"
+    r"\bto\s+be\s+deployed\b",     # passive future: "to be deployed"
 ]
 
 @dataclass

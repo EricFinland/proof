@@ -8,6 +8,10 @@ POSITIVE = [
     "The endpoint returns 200 — all set.",
     "Build is clean and the feature is complete.",
     "Deployed successfully, it should work now.",
+    # FIX 2: successfully + completion-scope verb still triggers
+    "Successfully deployed to production.",
+    # FIX 3: "deployed to production" still triggers
+    "Deployed to production.",
 ]
 NEGATIVE = [
     "I'm working on the failing test now.",
@@ -23,6 +27,14 @@ NEGATIVE = [
     "Status: complete with errors.",
     "Here is the verified list.",
     "Should work eventually.",
+    # FIX 2: successfully + routine verb must NOT trigger
+    "Successfully renamed the variable.",
+    "Successfully copied the file.",
+    "Successfully updated the config.",
+    # FIX 3: future/passive forms must NOT trigger
+    "This will be deployed to production later.",
+    "The app is being deployed.",
+    "To be deployed next sprint.",
 ]
 
 @pytest.mark.parametrize("msg", POSITIVE)

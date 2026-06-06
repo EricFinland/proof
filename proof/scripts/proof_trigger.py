@@ -10,7 +10,7 @@ from proofkit.marker import already_verified, mark_verified
 DIRECTIVE = (
     "PROOF: you just claimed work is complete. Do NOT stop. Spawn an INDEPENDENT "
     "verifier subagent (Task tool) that follows references/verifier-subagent.md: it "
-    "must run `python {script} verify --transcript \"{tp}\"`, assume your claims may "
+    "must run `python {script} verify --transcript \"{tp}\" --root \"{cwd}\"`, assume your claims may "
     "be false, trust only execution output, and report the PASS/FAIL/INCONCLUSIVE "
     "verdict with receipts. If FAIL, fix the issues and let Proof re-verify."
 )
@@ -31,9 +31,10 @@ def main():
         mark_verified(session, msg, root=root)
         script = Path(__file__).resolve().parent.joinpath("proof.py").as_posix()
         tp_posix = Path(tp).as_posix() if tp else ""
+        cwd = Path.cwd().as_posix()
         print(json.dumps({
             "decision": "block",
-            "reason": DIRECTIVE.format(script=script, tp=tp_posix),
+            "reason": DIRECTIVE.format(script=script, tp=tp_posix, cwd=cwd),
         }))
     except Exception:
         return  # never break a turn on hook error

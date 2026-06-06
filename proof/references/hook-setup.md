@@ -1,6 +1,15 @@
 # Hook Setup & Recursion Guard
 
-Proof installs a `Stop` hook running `python proof_trigger.py`.
+Proof installs a `Stop` hook. The installed command uses quoted absolute paths:
+
+```
+"<python-interpreter>" "<absolute path to proof_trigger.py>"
+```
+
+For example, on a typical install:
+```
+"C:\Python314\python.exe" "C:\Users\you\.claude\skills\proof\scripts\proof_trigger.py"
+```
 
 - The hook reads `{session_id, transcript_path, stop_hook_active}` from stdin.
 - It no-ops when `stop_hook_active` is true (prevents infinite verify loops).

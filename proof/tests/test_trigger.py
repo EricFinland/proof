@@ -23,6 +23,7 @@ def test_blocks_on_claim(tmp_path):
     out = json.loads(r.stdout)
     assert out["decision"] == "block"
     assert "verifier" in out["reason"].lower()
+    assert "--root" in out["reason"]
 
 def test_noop_on_non_claim(tmp_path):
     tp = _transcript(tmp_path, "Let me investigate the failure.")
