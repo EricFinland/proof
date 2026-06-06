@@ -1,0 +1,5 @@
+# proof/pyproject.toml
+[tool.pytest.ini_options]
+pythonpath = ["scripts"]
+testpaths = ["tests"]
+norecursedirs = ["tests/fixtures"]
