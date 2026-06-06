@@ -24,3 +24,17 @@ def test_disarm_removes_only_proof_hook(tmp_path):
     assert "proof_trigger.py" not in cmds
     assert "other.py" in cmds  # preserved
     assert is_armed(settings_path=settings) is False
+
+
+import subprocess, sys
+from pathlib import Path
+PROOF = str(Path(__file__).resolve().parents[1] / "scripts" / "proof.py")
+
+def test_cli_arm_status_disarm_roundtrip(tmp_path):
+    settings = tmp_path / ".claude" / "settings.json"
+    def run(*a): return subprocess.run([sys.executable, PROOF, *a],
+        capture_output=True, text=True)
+    run("arm", "--settings", str(settings))
+    assert "armed" in run("status", "--settings", str(settings)).stdout
+    run("disarm", "--settings", str(settings))
+    assert "disarmed" in run("status", "--settings", str(settings)).stdout
