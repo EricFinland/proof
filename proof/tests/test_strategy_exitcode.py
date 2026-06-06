@@ -13,7 +13,7 @@ def test_run_command_nonzero(tmp_path):
     assert r["code"] == 3
 
 
-# part 2 — build/typecheck/lint strategies
+# part 2 - build/typecheck/lint strategies
 from proofkit.strategies.exitcode import verify_build
 
 FIX = Path(__file__).resolve().parent / "fixtures"

@@ -9,7 +9,7 @@ CLAIM_PATTERNS = [
     r"\btests?\s+(?:are\s+)?pass(?:ing|ed|es)?\b",
     r"\ball\s+tests?\s+pass\b",
     r"\bbuild\s+is\s+(?:clean|green|passing)\b",
-    # "works now" — requires "now" to anchor completion
+    # "works now" - requires "now" to anchor completion
     r"\b(?:it|everything|this)\s+works?\s+now\b",
     r"\bworks?\s+now\b",
     # "all set" as a phrase (not bare "set")

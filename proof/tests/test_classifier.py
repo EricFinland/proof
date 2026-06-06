@@ -5,7 +5,7 @@ from proofkit.classifier import detect_claim
 POSITIVE = [
     "All done, tests pass.",
     "Fixed the bug, everything works now.",
-    "The endpoint returns 200 — all set.",
+    "The endpoint returns 200, all set.",
     "Build is clean and the feature is complete.",
     "Deployed successfully, it should work now.",
     # FIX 2: successfully + completion-scope verb still triggers
@@ -19,7 +19,7 @@ NEGATIVE = [
     "This might break if the input is empty.",
     "Let me investigate why the build is red.",
     "",
-    # New negatives — must NOT trigger
+    # New negatives - must NOT trigger
     "I fixed a typo in the comment.",
     "The done button is broken.",
     "Not done yet.",
