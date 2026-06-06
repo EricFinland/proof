@@ -15,6 +15,8 @@ before the turn is allowed to end.
 
 No configuration. No success criteria to write. Arm it once, then work normally.
 
+![Proof catching a false completion claim](assets/demo.gif)
+
 ## See it catch a lie
 
 A repository whose tests are red. The agent claims they are green. Proof runs the
@@ -49,6 +51,25 @@ And the receipt it writes to `proof-report.md`:
     FAILED test_bad.py::test_bad - assert 1 == 2
     1 failed in 0.05s
 ```
+
+### Caught in a real repo
+
+This is not a contrived fixture. Pointed at a real project whose test
+environment was silently broken, Proof caught that "all tests pass" was false:
+the suite did not even import.
+
+```
+$ proof verify --transcript turn.jsonl --root .
+FAIL
+  FAIL tests: `python -m pytest -q`
+
+  ERROR collecting tests/test_cli.py
+  E   ModuleNotFoundError: No module named 'mcp_audit'
+  exit code: 1
+```
+
+An agent that said "done, tests pass" there would have been wrong, and you would
+have found out three steps later. Proof finds out immediately.
 
 ## Why this matters
 
