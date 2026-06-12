@@ -58,17 +58,16 @@ def _config_fill(claims, root, cfg):
                 break
 
 
-def run_verify(transcript="", root=".", out_dir="."):
-    from proofkit import strategies
-    from proofkit.transcript import last_assistant_text
-    from proofkit.extractor import extract_claims
-    from proofkit.config import load_config
+def _execute_claims(claims, root, out_dir, project=None):
+    """Run all claims through their strategies, write report, append ledger, print verdict.
 
-    strategies.load_all()
-    msg = last_assistant_text(transcript) if transcript else ""
-    claims = extract_claims(msg, root=root)
-    cfg = load_config(root)
-    _config_fill(claims, root, cfg)
+    Returns an exit code int: 0=pass, 1=fail, 2=inconclusive.
+    """
+    from proofkit import strategies
+
+    if project is None:
+        project = Path(root).resolve().name
+
     results = []
     for c in claims:
         fn = strategies.get(c.strategy)
@@ -83,7 +82,7 @@ def run_verify(transcript="", root=".", out_dir="."):
     try:
         from proofkit import ledger as _ledger
         entry = {
-            "project": Path(root).resolve().name,
+            "project": project,
             "overall": overall,
             "n_claims": len(results),
             "fails": [r.method for r in results if r.verdict == "fail"],
@@ -99,3 +98,38 @@ def run_verify(transcript="", root=".", out_dir="."):
         if r.verdict == "fail":
             print(f"  FAIL {r.method}: `{r.command}`")
     return {"pass": 0, "fail": 1, "inconclusive": 2}[overall]
+
+
+def run_verify(transcript="", root=".", out_dir="."):
+    from proofkit import strategies
+    from proofkit.transcript import last_assistant_text
+    from proofkit.extractor import extract_claims
+    from proofkit.config import load_config
+
+    strategies.load_all()
+    msg = last_assistant_text(transcript) if transcript else ""
+    claims = extract_claims(msg, root=root)
+    cfg = load_config(root)
+    _config_fill(claims, root, cfg)
+    return _execute_claims(claims, root, out_dir,
+                           project=Path(root).resolve().name)
+
+
+def run_check(claim_text, root=".", out_dir="."):
+    """Verify any claim text directly, without a transcript.
+
+    Returns an exit code int: 0=pass, 1=fail, 2=inconclusive.
+    """
+    from proofkit import strategies
+    from proofkit.extractor import extract_claims
+    from proofkit.config import load_config
+
+    strategies.load_all()
+    claims = extract_claims(claim_text, root=root)
+    if not claims:
+        print("INCONCLUSIVE (no checkable claims found)")
+        return 2
+    cfg = load_config(root)
+    _config_fill(claims, root, cfg)
+    return _execute_claims(claims, root, out_dir,
+                           project=Path(root).resolve().name)
