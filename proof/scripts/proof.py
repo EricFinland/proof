@@ -1,5 +1,5 @@
 # proof/scripts/proof.py
-import argparse, sys
+import argparse, json, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from proofkit import install
@@ -8,6 +8,51 @@ TRIGGER = str(Path(__file__).resolve().parent / "proof_trigger.py")
 
 def _settings(args):
     return Path(args.settings) if args.settings else Path(".claude/settings.json")
+
+
+def _cmd_stats(args):
+    import datetime
+    from proofkit import ledger
+
+    root = getattr(args, "root", None)
+    days = getattr(args, "days", None)
+    as_json = getattr(args, "json", False)
+
+    entries = ledger.read_entries(days=days, root=root)
+    stats = ledger.compute_stats(entries)
+
+    if as_json:
+        print(json.dumps(stats))
+        return 0
+
+    if stats["total"] == 0:
+        print("No verifications recorded yet.")
+        return 0
+
+    verified = stats["passes"] + stats["fails"]
+    rate_pct = round(stats["honesty_rate"] * 100) if stats["honesty_rate"] is not None else 0
+    print(f"Honesty rate: {rate_pct}% ({verified} verified, {stats['fails']} lies caught)")
+    print(f"Clean streak: {stats['clean_streak']}")
+
+    if stats["worst_method"] is not None:
+        # Count occurrences for the human label
+        from collections import Counter
+        mc: Counter = Counter()
+        for e in entries:
+            if e.get("overall") == "fail":
+                for m in e.get("fails", []):
+                    mc[m] += 1
+        count = mc.get(stats["worst_method"], 0)
+        print(f"Worst offender: {stats['worst_method']} ({count} catches)")
+
+    if stats["last_catch"] is not None:
+        ts = stats["last_catch"]["ts"]
+        date_str = datetime.date.fromtimestamp(ts).isoformat()
+        claim = stats["last_catch"]["claim"]
+        print(f'Last catch: "{claim}" ({date_str})')
+
+    return 0
+
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="proof")
@@ -18,6 +63,10 @@ def main(argv=None):
     v = sub.add_parser("verify")
     v.add_argument("--transcript", required=False, default="")
     v.add_argument("--root", default=".")
+    st = sub.add_parser("stats")
+    st.add_argument("--days", type=int, default=None)
+    st.add_argument("--json", action="store_true", default=False)
+    st.add_argument("--root", default=None)
     args = ap.parse_args(argv)
 
     if args.cmd == "arm":
@@ -29,6 +78,8 @@ def main(argv=None):
     if args.cmd == "verify":
         from proofkit.verdict import run_verify  # added in M2/M4
         return run_verify(transcript=args.transcript, root=args.root)
+    if args.cmd == "stats":
+        return _cmd_stats(args)
     return 1
 
 if __name__ == "__main__":

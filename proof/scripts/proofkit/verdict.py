@@ -78,6 +78,21 @@ def run_verify(transcript="", root=".", out_dir="."):
                               expectation=c.expectation or None))
     overall = aggregate(results)
     write_report(results, overall, out_dir=out_dir)
+
+    # Append ledger entry; never let ledger failures affect the verdict or exit code.
+    try:
+        from proofkit import ledger as _ledger
+        entry = {
+            "project": Path(root).resolve().name,
+            "overall": overall,
+            "n_claims": len(results),
+            "fails": [r.method for r in results if r.verdict == "fail"],
+            "claims": [r.claim[:120] for r in results],
+        }
+        _ledger.append_entry(entry)
+    except Exception:
+        pass
+
     # Print ASCII-safe verdict to stdout (avoids cp1252 encoding errors on Windows).
     print(_ICON[overall])
     for r in results:
