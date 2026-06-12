@@ -1,0 +1,10 @@
+{
+  "name": "proof",
+  "description": "Use when an agent claims work is complete (\"tests pass\", \"it works\", \"deployed\") and you want it auto-verified. Catches hallucinated completion by spawning an independent verifier that runs the real checks and returns PASS/FAIL/INCONCLUSIVE with receipts. Arm once per project; the Stop hook fires automatically on every completion claim.",
+  "version": "2.0.0",
+  "author": { "name": "Eric Catalano", "email": "eric.catalano925@gmail.com" },
+  "homepage": "https://github.com/EricFinland/proof",
+  "repository": "https://github.com/EricFinland/proof",
+  "license": "MIT",
+  "keywords": ["verification", "agent-reliability", "hooks", "testing", "claude-code"]
+}

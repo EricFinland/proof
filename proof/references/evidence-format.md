@@ -79,7 +79,7 @@ An empty result list (no claims extracted) is INCONCLUSIVE.
 
 ## Exit-code mapping
 
-`proof.py verify` exits with:
+`proof.py verify` and `proof.py check` exit with:
 
 | Exit code | Verdict |
 |---|---|
@@ -87,5 +87,65 @@ An empty result list (no claims extracted) is INCONCLUSIVE.
 | 1 | FAIL |
 | 2 | INCONCLUSIVE |
 
-This mapping makes `proof.py verify` usable as a CI gate: a non-zero exit
-indicates that verification did not pass.
+This mapping makes `proof.py verify` and `proof.py check` usable as CI gates:
+a non-zero exit indicates that verification did not pass.
+
+---
+
+## JSON output (--json)
+
+Both `verify` and `check` accept `--json`. When set, a single JSON object is
+printed to stdout instead of the ASCII verdict lines. The process exit code is
+unchanged.
+
+### Schema
+
+```json
+{
+  "overall": "pass" | "fail" | "inconclusive",
+  "exit":    0 | 1 | 2,
+  "results": [
+    {
+      "claim":      "<original claim text>",
+      "method":     "<strategy name>",
+      "command":    "<command that was run>",
+      "raw_output": "<captured stdout+stderr, up to 2000 chars>",
+      "verdict":    "pass" | "fail" | "inconclusive",
+      "confidence": <float 0.0-1.0>
+    }
+  ],
+  "report":  "<absolute path to proof-report.md>"
+}
+```
+
+### Key notes
+
+- `overall` mirrors the exit code: `"pass"` -> 0, `"fail"` -> 1,
+  `"inconclusive"` -> 2.
+- `results` is a list with one entry per claim extracted from the message.
+- `raw_output` is truncated to 2000 characters per result.
+- `report` is a non-empty string path on every successful run; it may be an
+  empty string if no claims were found (`check` with unmappable text).
+- When `check` is given text with no recognizable claims, the output is
+  `{"overall": "inconclusive", "exit": 2, "results": [], "report": ""}`.
+
+### Example
+
+```bash
+$ proof check "all tests pass" --root /my/project --json
+{
+  "overall": "fail",
+  "exit": 1,
+  "results": [
+    {
+      "claim": "all tests pass",
+      "method": "tests",
+      "command": "python -m pytest -q",
+      "raw_output": "FAILED tests/test_foo.py::test_bar\n1 failed in 0.12s",
+      "verdict": "fail",
+      "confidence": 1.0
+    }
+  ],
+  "report": "/my/project/proof-report.md"
+}
+```

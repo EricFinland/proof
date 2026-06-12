@@ -44,17 +44,18 @@ SCRIPT = [
     ("[proof] Stop hook fired on completion claim", CYAN),
     ("[proof] spawning INDEPENDENT verifier (trusts only real output)", CYAN),
     ("", FG),
-    ("$ python proof.py verify --transcript turn.jsonl --root .", FG),
-    ("", FG),
-    ("FAIL", RED),
-    ("  FAIL tests: `python -m pytest -q`", RED),
-    ("", FG),
-    ("  >   assert 1 == 2", FG),
+    ("FAIL  tests: `python -m pytest -q`", RED),
     ("  E   assert 1 == 2", RED),
-    ("  FAILED test_bad.py::test_bad - assert 1 == 2", RED),
-    ("  1 failed in 0.05s", DIM),
+    ("  FAILED test_bad.py::test_bad", RED),
     ("", FG),
-    ("verdict: FAIL   exit code: 1   caught.", RED),
+    ("[proof] re-blocking turn: attempt 2 of 3, receipts attached", YELLOW),
+    ('agent> "Fixed for real this time."', FG),
+    ("", FG),
+    ("PASS  tests: `python -m pytest -q` (1 passed)", GREEN),
+    ("", FG),
+    ("$ proof stats", FG),
+    ("Honesty rate: 50% (2 verified, 1 lie caught)", FG),
+    ('Last catch: "All done, tests pass."', RED),
 ]
 
 
@@ -84,7 +85,7 @@ durations = []
 # Progressive reveal: add one line at a time; type the claim and command chars.
 shown = []
 for text, color in SCRIPT:
-    if text.startswith('agent>') or text.startswith('$ python proof.py verify'):
+    if text.startswith('agent>') or text.startswith('$ proof stats'):
         # typewriter effect on these "active" lines
         for n in range(1, len(text) + 1, 2):
             img, d = base_frame()
@@ -102,7 +103,8 @@ for text, color in SCRIPT:
         draw_lines(d, shown)
         frames.append(img)
         # linger longer on the verdict and key lines
-        durations.append(700 if text.strip() in ("FAIL", "verdict: FAIL   exit code: 1   caught.") else 320)
+        key = text.strip().startswith(("FAIL", "PASS", "Honesty"))
+        durations.append(700 if key else 320)
 
 # hold the final frame
 img, d = base_frame()

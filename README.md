@@ -120,8 +120,11 @@ python proof/scripts/proof.py verify --transcript <path> --root <repo>
    agent to spawn an independent verifier subagent.
 4. The verifier extracts the checkable assertions, runs the matching strategy,
    aggregates a strict verdict, and writes `proof-report.md`.
-5. A per-session recursion guard verifies each distinct claim exactly once, so
-   the verifier's own output can never trigger a loop.
+5. A per-session fix loop re-blocks after a FAIL (up to `max_fix_cycles`, default
+   3). After a PASS or INCONCLUSIVE the claim is never re-blocked. If the limit
+   is reached without a pass, Proof gives up silently rather than nagging forever.
+   On re-block, the previous `proof-report.md` is prepended as "PREVIOUS RECEIPTS"
+   and the directive notes "attempt N of MAX".
 
 ## Verifier strategies
 
@@ -130,17 +133,111 @@ INCONCLUSIVE, never a false PASS.
 
 | Strategy | Verifies a claim like |
 |----------|-----------------------|
-| `tests` | "tests pass" (auto-detects pytest, npm, cargo, go) |
+| `tests` | "tests pass" (auto-detects runner by repo files) |
 | `build` | "the build is clean" |
 | `typecheck` | "types check" |
 | `lint` | "lint is clean" |
 | `command` | "running X works" |
-| `http` | "GET /health returns 200" |
+| `http` | "GET /health returns 200", body assertions, boots local servers, verifies live deploy URLs |
 | `repro` | "the bug is fixed" (re-runs the original repro) |
 | `filecheck` | "added function X to file Y" |
 
-The strategy layer is pluggable. UI/browser and live-deploy verifiers are the
-natural next additions.
+## Runner support
+
+Test and build runner auto-detection covers: Node/Bun/pnpm/yarn/npm
+(by lockfile), Python/pytest, Rust/Cargo, Go, Maven, Gradle (wrapper preferred),
+.NET (sln/csproj), Make (when a `test:` target exists), Elixir/Mix, PHP/Composer.
+
+## HTTP verification (v2)
+
+The `http` strategy handles three scenarios:
+
+1. **Live URL in claim.** Makes an HTTP GET and checks the status code. Non-local
+   URLs that are unreachable are treated as a failed deploy claim (FAIL, not
+   INCONCLUSIVE).
+2. **Local URL, server not running.** Boots a local server automatically using
+   (in order): `[http].serve` from `.proof.toml`, then `package.json` `dev`/`start`
+   script, then `Procfile` `web:` line. Polls for readiness up to 30 seconds,
+   then tears down the process tree.
+3. **Body assertion.** Claims containing `with "..."` or `containing "..."` (e.g.,
+   `GET /health returns 200 with "ok"`) also check that the response body contains
+   the expected substring.
+
+## Fix loop
+
+When verification fails, Proof does not let the agent walk away. It re-blocks
+the turn with the previous `proof-report.md` receipts and a note reading
+"attempt N of MAX". After `max_fix_cycles` failed attempts (default 3, override
+in `.proof.toml`), Proof stops blocking so you are not stuck in an infinite
+loop. A passing verdict clears the loop immediately.
+
+## proof stats
+
+Track the agent's honesty over time. Every `proof verify` run appends an entry
+to `~/.proof/ledger.jsonl` (override with `PROOF_HOME`).
+
+```
+$ proof stats
+Honesty rate: 72% (18 verified, 5 lies caught)
+Clean streak: 4
+Worst offender: tests (3 catches)
+Last catch: "All done, tests pass." (2026-06-10)
+```
+
+Filter to recent runs:
+
+```
+$ proof stats --days 7
+```
+
+Machine-readable output for CI pipelines:
+
+```
+$ proof stats --json
+```
+
+## Works with any agent
+
+`proof check` verifies any claim text directly, without a transcript. Works from
+CI or with any coding agent:
+
+```bash
+proof check "all tests pass and the build is clean" --root /repo --json
+# exit 0 = PASS, 1 = FAIL, 2 = INCONCLUSIVE
+```
+
+The `--json` flag emits a single JSON object with keys `overall`, `exit`,
+`results`, and `report`. Pipe it into any CI assertion or notification webhook.
+
+## .proof.toml reference
+
+Place `.proof.toml` in your project root to override auto-detection.
+
+| Key | What it does | Default |
+|-----|-------------|---------|
+| `[commands].test` | Test command used instead of auto-detected runner (singular key; `tests` is also accepted) | auto-detect |
+| `[commands].build` | Build command used instead of auto-detected runner | auto-detect |
+| `[commands].typecheck` | Typecheck command (no auto-detect; required to get a non-inconclusive verdict) | none |
+| `[commands].lint` | Lint command (no auto-detect; required to get a non-inconclusive verdict) | none |
+| `[http].base_url` | Base URL used for HTTP claims that contain no URL | none |
+| `[http].serve` | Shell command to boot a local server for HTTP verification | auto-detect |
+| `[verify].max_fix_cycles` | Maximum number of re-verification attempts before Proof stops blocking | `3` |
+
+Example:
+
+```toml
+[commands]
+test = "pytest -x -q"
+lint = "ruff check ."
+typecheck = "mypy src"
+
+[http]
+base_url = "http://localhost:3000"
+serve = "npm run dev"
+
+[verify]
+max_fix_cycles = 5
+```
 
 ## Design
 
@@ -161,9 +258,10 @@ cd proof
 python -m pytest -q
 ```
 
-71 tests cover the classifier, claim extractor, every strategy, verdict
-aggregation, the Stop hook's crash-safety and recursion guard, the installer,
-and an end-to-end acceptance test that reproduces the demo above.
+199 tests cover the classifier, claim extractor, every strategy, verdict
+aggregation, the Stop hook's crash-safety and recursion guard, the ledger,
+the fix loop, the installer, and an end-to-end acceptance test that reproduces
+the demo above.
 
 ## License
 

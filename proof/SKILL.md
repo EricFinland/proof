@@ -45,9 +45,64 @@ the current directory, prints the verdict to stdout, and exits:
    strategies, aggregates results (any FAIL -> overall FAIL), and writes
    `proof-report.md` with the command output receipt for every check.
 
+## Check (agent-agnostic verification)
+
+Verify any claim text directly, without a transcript. Works with any coding
+agent or from CI:
+
+```
+python scripts/proof.py check "all tests pass and the build is clean" --root <repo>
+```
+
+Exit codes are the same as `verify`: 0 = PASS, 1 = FAIL, 2 = INCONCLUSIVE.
+Add `--json` for machine-readable output (keys: `overall`, `exit`, `results`,
+`report`). See `references/evidence-format.md` for the full JSON schema.
+
+## Stats (honesty ledger)
+
+Every `proof verify` run appends an entry to `~/.proof/ledger.jsonl` (override
+with `PROOF_HOME`). View aggregate stats:
+
+```
+python scripts/proof.py stats           # human-readable
+python scripts/proof.py stats --days 7  # last 7 days only
+python scripts/proof.py stats --json    # machine-readable
+```
+
+Sample output:
+
+```
+Honesty rate: 72% (18 verified, 5 lies caught)
+Clean streak: 4
+Worst offender: tests (3 catches)
+Last catch: "All done, tests pass." (2026-06-10)
+```
+
+## Configuration (.proof.toml)
+
+Place `.proof.toml` in the project root to override auto-detection:
+
+```toml
+[commands]
+test      = "pytest -x -q"
+typecheck = "mypy src"
+lint      = "ruff check ."
+
+[http]
+base_url = "http://localhost:3000"
+serve    = "npm run dev"
+
+[verify]
+max_fix_cycles = 5
+```
+
+See `references/configuration.md` for every key, its default, and precedence
+rules.
+
 ## References
 
-- `references/hook-setup.md` -- Stop hook wiring and recursion guard
+- `references/hook-setup.md` -- Stop hook wiring, blocking policy, recursion guard
 - `references/verifier-subagent.md` -- adversarial verifier subagent prompt
 - `references/verifier-strategies.md` -- per-strategy detection and verdict rules
-- `references/evidence-format.md` -- proof-report.md layout and exit-code mapping
+- `references/evidence-format.md` -- proof-report.md layout, exit-code mapping, --json schema
+- `references/configuration.md` -- .proof.toml full reference
