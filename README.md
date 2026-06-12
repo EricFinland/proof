@@ -81,13 +81,21 @@ whole turn.
 
 ## Install
 
+One line, via the [skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add EricFinland/proof
+```
+
+Or grab it directly and arm the hook yourself:
+
 ```bash
 cd <your project>
 python /path/to/proof/scripts/proof.py arm
 ```
 
-This adds a `Stop` hook to your project's `.claude/settings.json`. Then work as
-usual. Turn it off any time:
+Arming adds a `Stop` hook to your project's `.claude/settings.json`. Then work
+as usual. Turn it off any time:
 
 ```bash
 python /path/to/proof/scripts/proof.py disarm   # remove the hook
