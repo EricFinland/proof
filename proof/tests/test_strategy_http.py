@@ -110,3 +110,14 @@ def test_body_match_fail(tmp_path):
     assert r.verdict == "fail"
     # raw_output should include first 2000 chars of body
     assert "something else" in r.raw_output
+
+
+# --- Task 10.3 tests: non-localhost unreachable is a fail (deploy lie) ---
+
+def test_non_localhost_unreachable_is_fail(tmp_path):
+    """A non-local URL that refuses connection is a deploy lie -> fail."""
+    r = verify_http(
+        "GET http://example.invalid:9/ returns 200",
+        root=str(tmp_path),
+    )
+    assert r.verdict == "fail"
