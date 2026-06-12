@@ -3,6 +3,7 @@ import argparse, json, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from proofkit import install
+import proofkit
 
 TRIGGER = str(Path(__file__).resolve().parent / "proof_trigger.py")
 
@@ -59,6 +60,8 @@ def _cmd_stats(args):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="proof")
+    ap.add_argument("--version", action="version",
+                    version=f"proof {proofkit.__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("arm", "disarm", "status"):
         s = sub.add_parser(name)
@@ -69,6 +72,8 @@ def main(argv=None):
     v.add_argument("--session", default=None, help="Session ID for outcome recording")
     v.add_argument("--out-dir", default=".", dest="out_dir",
                    help="Directory to write proof-report.md (default: current dir)")
+    v.add_argument("--json", action="store_true", default=False,
+                   help="Emit machine-readable JSON instead of ASCII verdict")
     st = sub.add_parser("stats")
     st.add_argument("--days", type=int, default=None)
     st.add_argument("--json", action="store_true", default=False)
@@ -76,6 +81,8 @@ def main(argv=None):
     ck = sub.add_parser("check")
     ck.add_argument("claim", help="Claim text to verify")
     ck.add_argument("--root", default=".")
+    ck.add_argument("--json", action="store_true", default=False,
+                    help="Emit machine-readable JSON instead of ASCII verdict")
     args = ap.parse_args(argv)
 
     if args.cmd == "arm":
@@ -88,12 +95,14 @@ def main(argv=None):
         from proofkit.verdict import run_verify  # added in M2/M4
         return run_verify(transcript=args.transcript, root=args.root,
                           out_dir=getattr(args, "out_dir", "."),
-                          session_id=getattr(args, "session", None))
+                          session_id=getattr(args, "session", None),
+                          as_json=getattr(args, "json", False))
     if args.cmd == "stats":
         return _cmd_stats(args)
     if args.cmd == "check":
         from proofkit.verdict import run_check
-        return run_check(claim_text=args.claim, root=args.root)
+        return run_check(claim_text=args.claim, root=args.root,
+                         as_json=getattr(args, "json", False))
     return 1
 
 if __name__ == "__main__":

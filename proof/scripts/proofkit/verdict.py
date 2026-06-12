@@ -1,3 +1,4 @@
+import json as _json
 from pathlib import Path
 
 
@@ -58,10 +59,32 @@ def _config_fill(claims, root, cfg):
                 break
 
 
-def _execute_claims(claims, root, out_dir, project=None):
+def _build_json_payload(results, overall, report_path):
+    """Build the standard JSON payload dict shared by verify --json and check --json."""
+    exit_code = {"pass": 0, "fail": 1, "inconclusive": 2}[overall]
+    items = []
+    for r in results:
+        items.append({
+            "claim": r.claim,
+            "method": r.method,
+            "command": r.command,
+            "raw_output": r.raw_output[:2000],
+            "verdict": r.verdict,
+            "confidence": r.confidence,
+        })
+    return {
+        "overall": overall,
+        "exit": exit_code,
+        "results": items,
+        "report": str(report_path),
+    }
+
+
+def _execute_claims(claims, root, out_dir, project=None, as_json=False):
     """Run all claims through their strategies, write report, append ledger, print verdict.
 
     Returns an exit code int: 0=pass, 1=fail, 2=inconclusive.
+    When as_json=True, prints one JSON object instead of ASCII verdict lines.
     """
     from proofkit import strategies
 
@@ -76,7 +99,7 @@ def _execute_claims(claims, root, out_dir, project=None):
                               command=c.command or None,
                               expectation=c.expectation or None))
     overall = aggregate(results)
-    write_report(results, overall, out_dir=out_dir)
+    report_path = write_report(results, overall, out_dir=out_dir)
 
     # Append ledger entry; never let ledger failures affect the verdict or exit code.
     try:
@@ -92,15 +115,22 @@ def _execute_claims(claims, root, out_dir, project=None):
     except Exception:
         pass
 
-    # Print ASCII-safe verdict to stdout (avoids cp1252 encoding errors on Windows).
-    print(_ICON[overall])
-    for r in results:
-        if r.verdict == "fail":
-            print(f"  FAIL {r.method}: `{r.command}`")
-    return {"pass": 0, "fail": 1, "inconclusive": 2}[overall]
+    exit_code = {"pass": 0, "fail": 1, "inconclusive": 2}[overall]
+
+    if as_json:
+        payload = _build_json_payload(results, overall, report_path)
+        print(_json.dumps(payload))
+    else:
+        # Print ASCII-safe verdict to stdout (avoids cp1252 encoding errors on Windows).
+        print(_ICON[overall])
+        for r in results:
+            if r.verdict == "fail":
+                print(f"  FAIL {r.method}: `{r.command}`")
+
+    return exit_code
 
 
-def run_verify(transcript="", root=".", out_dir=".", session_id=None):
+def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=False):
     from proofkit import strategies
     from proofkit.transcript import last_assistant_text
     from proofkit.extractor import extract_claims
@@ -112,7 +142,8 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None):
     cfg = load_config(root)
     _config_fill(claims, root, cfg)
     exit_code = _execute_claims(claims, root, out_dir,
-                                project=Path(root).resolve().name)
+                                project=Path(root).resolve().name,
+                                as_json=as_json)
 
     # Record outcome into marker when called with a session_id (e.g. from trigger directive).
     if session_id and msg:
@@ -130,7 +161,7 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None):
     return exit_code
 
 
-def run_check(claim_text, root=".", out_dir="."):
+def run_check(claim_text, root=".", out_dir=".", as_json=False):
     """Verify any claim text directly, without a transcript.
 
     Returns an exit code int: 0=pass, 1=fail, 2=inconclusive.
@@ -142,9 +173,14 @@ def run_check(claim_text, root=".", out_dir="."):
     strategies.load_all()
     claims = extract_claims(claim_text, root=root)
     if not claims:
-        print("INCONCLUSIVE (no checkable claims found)")
+        if as_json:
+            payload = {"overall": "inconclusive", "exit": 2, "results": [], "report": ""}
+            print(_json.dumps(payload))
+        else:
+            print("INCONCLUSIVE (no checkable claims found)")
         return 2
     cfg = load_config(root)
     _config_fill(claims, root, cfg)
     return _execute_claims(claims, root, out_dir,
-                           project=Path(root).resolve().name)
+                           project=Path(root).resolve().name,
+                           as_json=as_json)
