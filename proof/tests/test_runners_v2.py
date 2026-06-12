@@ -108,6 +108,10 @@ def test_maven_build_cmd(tmp_path):
 # Gradle
 # ---------------------------------------------------------------------------
 
+import sys
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="gradlew.bat preference is Windows-only")
 def test_gradle_wrapper_bat_test_cmd(tmp_path):
     """On Windows: gradlew.bat is preferred wrapper."""
     (tmp_path / "gradlew.bat").write_text("@echo off", encoding="utf-8")
@@ -115,6 +119,14 @@ def test_gradle_wrapper_bat_test_cmd(tmp_path):
     cmd = detect_test_cmd(tmp_path)
     assert cmd[0].endswith("gradlew.bat") or cmd[0] == "gradlew.bat"
     assert cmd[1:] == ["test"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only behavior")
+def test_gradle_bat_only_on_posix_falls_to_bare_gradle(tmp_path):
+    """A repo with only gradlew.bat on POSIX falls back to bare gradle."""
+    (tmp_path / "gradlew.bat").write_text("@echo off", encoding="utf-8")
+    (tmp_path / "build.gradle").write_text("", encoding="utf-8")
+    assert detect_test_cmd(tmp_path) == ["gradle", "test"]
 
 
 def test_gradle_wrapper_unix_test_cmd(tmp_path):
