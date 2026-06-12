@@ -38,19 +38,16 @@ _RUNNER_DETECTORS = {"tests": "detect_test_cmd", "build": "detect_build_cmd"}
 
 
 def _config_fill(claims, root, cfg):
-    """Fill command from .proof.toml for claims with no explicit command and no runner."""
+    """Fill command from .proof.toml for claims with no explicit command.
+
+    Precedence per strategy: claim-explicit > .proof.toml [commands] > auto-detect.
+    Config command is checked BEFORE auto-detection so it always wins when set.
+    """
     from proofkit.config import cfg_get
-    from proofkit import runners as _runners
 
     for c in claims:
         if c.command or c.strategy not in _CONFIG_STRATEGIES:
             continue
-        # Only fill from config when no runner is naturally detected
-        detector_name = _RUNNER_DETECTORS.get(c.strategy)
-        if detector_name:
-            detector = getattr(_runners, detector_name, None)
-            if detector and detector(root) is not None:
-                continue  # runner detected; let strategy handle it
         cmd_str = cfg_get(cfg, "commands", c.strategy)
         if cmd_str:
             c.command = cmd_str
