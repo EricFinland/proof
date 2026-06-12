@@ -1,10 +1,17 @@
-# Proof
+# Proof (v2.0.0)
 
 Proof is a Claude Code skill and Stop hook that auto-fact-checks completion
 claims made by the agent. When the agent says "tests pass" or "all done, it
 works", Proof fires an independent verifier that runs the real checks and
 returns a strict PASS/FAIL/INCONCLUSIVE verdict with receipts before the
 session ends.
+
+v2 adds: fix loop with receipts (re-blocks up to `max_fix_cycles` after FAIL),
+`proof check` for agent-agnostic verification, `proof stats` honesty ledger,
+HTTP body assertions and local server boot, full runner support matrix
+(Bun/pnpm/yarn/npm by lockfile, Gradle wrapper, Make, Mix, Composer, .NET),
+`.proof.toml` configuration, `--json` output on verify/check/stats, and
+`--session`/`--out-dir` flags on verify.
 
 ## The trust problem
 
@@ -115,10 +122,11 @@ python scripts/proof.py verify \
 
 ## References
 
-- `references/hook-setup.md` -- hook wiring, recursion guard details
+- `references/hook-setup.md` -- hook wiring, blocking policy, recursion guard
 - `references/verifier-subagent.md` -- the adversarial verifier prompt
 - `references/verifier-strategies.md` -- per-strategy detection and verdict rules
-- `references/evidence-format.md` -- proof-report.md layout and exit-code mapping
+- `references/evidence-format.md` -- proof-report.md layout, exit-code mapping, --json schema
+- `references/configuration.md` -- .proof.toml full reference
 
 ## Requirements
 

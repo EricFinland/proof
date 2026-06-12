@@ -17,11 +17,26 @@ def verify_*(claim, root, command=None, expectation=None) -> Result
 "all tests pass", or similar (matched by the extractor's regex).
 
 **Execution:** calls `detect_test_cmd(root)` to auto-detect the test runner from
-repo files. Detection order: `package.json` with a `test` script (runs
-`npm test --silent`), `pyproject.toml` / `pytest.ini` / `tests/` directory
-(runs `python -m pytest -q`), `Cargo.toml` (runs `cargo test -q`), `go.mod`
-(runs `go test ./...`). If a `command` argument is supplied it is used instead,
-split on whitespace.
+repo files. A command set in `.proof.toml` `[commands].test` (or `.tests`)
+takes precedence over auto-detection. Detection order when no config command is
+set:
+
+1. `package.json` with a `test` script. Package manager chosen by lockfile:
+   `bun.lockb`/`bun.lock` -> `bun run test`; `pnpm-lock.yaml` -> `pnpm run test`;
+   `yarn.lock` -> `yarn run test`; else `npm test --silent`.
+2. `pyproject.toml`, `pytest.ini`, or a `tests/` directory -> `python -m pytest -q`.
+3. `Cargo.toml` -> `cargo test -q`.
+4. `go.mod` -> `go test ./...`.
+5. `pom.xml` -> `mvn -q test`.
+6. `build.gradle` / `build.gradle.kts` / `gradlew` / `gradlew.bat` -> Gradle
+   wrapper (`gradlew test` or `gradlew.bat test`) if present, else `gradle test`.
+7. `*.sln` or `*.csproj` -> `dotnet test`.
+8. `Makefile` with a `test:` target -> `make test`.
+9. `mix.exs` -> `mix test`.
+10. `composer.json` with a `scripts.test` key -> `composer test`.
+
+If a `command` argument is supplied directly it is used instead of all of the
+above, split on whitespace.
 
 **Verdict rules:**
 - PASS -- command exits 0
@@ -97,18 +112,42 @@ it ran successfully. The extractor passes the command string verbatim.
 like "returns 200" or "endpoint". The URL is extracted by regex; the expected
 status defaults to "200".
 
-**Execution:** makes an HTTP GET to the URL using `urllib.request.urlopen` with
-a 10-second timeout. Reads up to 2000 bytes of the response body.
+**Execution (v2):** the strategy resolves the URL and optional body expectation
+from the claim, then picks one of three execution paths:
+
+1. **URL is reachable.** Makes an HTTP GET using `urllib.request.urlopen` with a
+   10-second timeout, reads up to 2000 bytes of the response body, then
+   evaluates status and (optionally) body.
+
+2. **URL is local and connection is refused.** Boots a local server automatically.
+   Serve command resolution order: `[http].serve` in `.proof.toml`, then
+   `package.json` `scripts.dev` or `scripts.start`, then the first `web:` line in
+   `Procfile`. The server is started in a new process group; readiness is polled
+   every 0.5 s for up to 30 seconds. After the check the process tree is killed
+   with `taskkill /T /F` (Windows) or `SIGTERM` to the process group (POSIX).
+   Returns INCONCLUSIVE if no serve command is found or the server does not
+   become ready within 30 s.
+
+3. **URL is non-local and connection fails.** The claim asserts a deployed URL
+   that is unreachable. This is treated as a failed deployment claim: FAIL with
+   confidence 1.0, not INCONCLUSIVE.
+
+**Body assertions:** if the claim contains `with "..."` or `containing "..."`,
+the quoted string must appear as a substring in the response body; otherwise the
+result is FAIL even if the status code matched.
+
+**Status parsing:** a three-digit number preceded by "returns" or "status" in the
+claim text sets the expected status code. Claims like "returns 404" pass when the
+server actually returns 404.
 
 **Verdict rules:**
-- PASS -- actual HTTP status code matches the expected status (string comparison)
-- FAIL -- status code does not match, OR the request raises an exception
-  (connection refused, DNS failure, etc.)
-- INCONCLUSIVE -- no URL in the claim; confidence 0.2
-
-Note: non-2xx responses that raise `urllib.error.HTTPError` are caught and
-their status codes are compared against the expectation, so a claim of "returns
-404" would pass if the server returns 404.
+- PASS -- status code matches AND (if a body assertion is present) the expected
+  substring is found in the response body
+- FAIL -- status code does not match, OR body assertion fails, OR non-local URL
+  is unreachable
+- INCONCLUSIVE -- no URL found in the claim (confidence 0.2), OR local server
+  not running and no serve command found (confidence 0.3), OR local server did
+  not become ready within 30 s (confidence 0.3)
 
 ---
 
