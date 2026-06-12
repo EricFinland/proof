@@ -31,7 +31,9 @@ def _cmd_stats(args):
 
     verified = stats["passes"] + stats["fails"]
     rate_pct = round(stats["honesty_rate"] * 100) if stats["honesty_rate"] is not None else 0
-    print(f"Honesty rate: {rate_pct}% ({verified} verified, {stats['fails']} lies caught)")
+    lies = stats["fails"]
+    lie_word = "lie" if lies == 1 else "lies"
+    print(f"Honesty rate: {rate_pct}% ({verified} verified, {lies} {lie_word} caught)")
     print(f"Clean streak: {stats['clean_streak']}")
 
     if stats["worst_method"] is not None:
@@ -43,7 +45,8 @@ def _cmd_stats(args):
                 for m in e.get("fails", []):
                     mc[m] += 1
         count = mc.get(stats["worst_method"], 0)
-        print(f"Worst offender: {stats['worst_method']} ({count} catches)")
+        catch_word = "catch" if count == 1 else "catches"
+        print(f"Worst offender: {stats['worst_method']} ({count} {catch_word})")
 
     if stats["last_catch"] is not None:
         ts = stats["last_catch"]["ts"]
