@@ -45,12 +45,17 @@ def _config_fill(claims, root, cfg):
     """
     from proofkit.config import cfg_get
 
+    # User-facing config keys are singular ("test", like package.json scripts);
+    # the strategy name ("tests") is accepted as an alias.
+    key_aliases = {"tests": ("test", "tests")}
     for c in claims:
         if c.command or c.strategy not in _CONFIG_STRATEGIES:
             continue
-        cmd_str = cfg_get(cfg, "commands", c.strategy)
-        if cmd_str:
-            c.command = cmd_str
+        for key in key_aliases.get(c.strategy, (c.strategy,)):
+            cmd_str = cfg_get(cfg, "commands", key)
+            if cmd_str:
+                c.command = cmd_str
+                break
 
 
 def run_verify(transcript="", root=".", out_dir="."):

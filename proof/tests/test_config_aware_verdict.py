@@ -87,3 +87,18 @@ def test_config_command_not_applied_to_http_strategy(tmp_path):
     transcript = _make_transcript(tmp_path, "The endpoint returns 200.")
     code = run_verify(transcript=transcript, root=str(repo), out_dir=str(tmp_path))
     assert code in (1, 2), "http claim without reachable URL should fail or be inconclusive"
+
+
+def test_singular_test_key_is_honored(tmp_path):
+    """Users write [commands] test = ... (singular, like package.json scripts)."""
+    import json
+    from proofkit.verdict import run_verify
+
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (tmp_path / ".proof.toml").write_text(
+        '[commands]\ntest = "python -c exit(0)"\n', encoding="utf-8"
+    )
+    t = tmp_path / "t.jsonl"
+    t.write_text(json.dumps({"type": "assistant", "message": {"role": "assistant",
+        "content": [{"type": "text", "text": "All done, tests pass."}]}}))
+    assert run_verify(transcript=str(t), root=str(tmp_path), out_dir=str(tmp_path)) == 0
