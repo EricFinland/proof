@@ -100,7 +100,7 @@ def _execute_claims(claims, root, out_dir, project=None):
     return {"pass": 0, "fail": 1, "inconclusive": 2}[overall]
 
 
-def run_verify(transcript="", root=".", out_dir="."):
+def run_verify(transcript="", root=".", out_dir=".", session_id=None):
     from proofkit import strategies
     from proofkit.transcript import last_assistant_text
     from proofkit.extractor import extract_claims
@@ -111,8 +111,23 @@ def run_verify(transcript="", root=".", out_dir="."):
     claims = extract_claims(msg, root=root)
     cfg = load_config(root)
     _config_fill(claims, root, cfg)
-    return _execute_claims(claims, root, out_dir,
-                           project=Path(root).resolve().name)
+    exit_code = _execute_claims(claims, root, out_dir,
+                                project=Path(root).resolve().name)
+
+    # Record outcome into marker when called with a session_id (e.g. from trigger directive).
+    if session_id and msg:
+        try:
+            from proofkit.marker import record_outcome
+            verdict_map = {0: "pass", 1: "fail", 2: "inconclusive"}
+            verdict = verdict_map.get(exit_code, "inconclusive")
+            # Use PROOF_HOME env var for marker root (matches trigger behavior)
+            import os
+            marker_root = os.environ.get("PROOF_HOME") or None
+            record_outcome(session_id, msg, verdict, root=marker_root)
+        except Exception:
+            pass  # never let marker failures affect the verdict
+
+    return exit_code
 
 
 def run_check(claim_text, root=".", out_dir="."):

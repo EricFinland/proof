@@ -66,6 +66,7 @@ def main(argv=None):
     v = sub.add_parser("verify")
     v.add_argument("--transcript", required=False, default="")
     v.add_argument("--root", default=".")
+    v.add_argument("--session", default=None, help="Session ID for outcome recording")
     st = sub.add_parser("stats")
     st.add_argument("--days", type=int, default=None)
     st.add_argument("--json", action="store_true", default=False)
@@ -83,7 +84,8 @@ def main(argv=None):
         print("armed" if install.is_armed(_settings(args)) else "disarmed"); return 0
     if args.cmd == "verify":
         from proofkit.verdict import run_verify  # added in M2/M4
-        return run_verify(transcript=args.transcript, root=args.root)
+        return run_verify(transcript=args.transcript, root=args.root,
+                          session_id=getattr(args, "session", None))
     if args.cmd == "stats":
         return _cmd_stats(args)
     if args.cmd == "check":
