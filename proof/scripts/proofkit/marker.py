@@ -47,7 +47,10 @@ def _load(root) -> dict:
 
 
 def _save(data: dict, root) -> None:
-    _store(root).write_text(json.dumps(data))
+    target = _store(root)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(target)
 
 
 def record_attempt(session: str, msg: str, root=None) -> None:

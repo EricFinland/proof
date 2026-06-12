@@ -1,6 +1,7 @@
 import re
 import urllib.request
 import urllib.error
+import urllib.parse
 
 from proofkit.strategies import register
 from proofkit.strategies.base import Result
@@ -9,6 +10,16 @@ from proofkit.config import load_config, cfg_get
 _URL_RE = re.compile(r"https?://[^\s)]+")
 _STATUS_RE = re.compile(r'(?:returns?|status)\s+(\d{3})\b', re.I)
 _WITH_RE = re.compile(r'(?:with|containing)\s+"([^"]+)"', re.I)
+
+
+def _split_serve(cmd: str) -> list:
+    """Split a serve command string into a list suitable for Popen.
+
+    Always uses POSIX mode so quoted paths do not retain their surrounding
+    quotes when passed to Popen as a list.
+    """
+    import shlex
+    return shlex.split(cmd)
 
 
 def parse_http_claim(claim, cfg):
@@ -46,18 +57,18 @@ def _attempt(url):
 
 
 def _is_local(url):
-    m = re.match(r"https?://([^/:]+)", url)
-    if not m:
+    try:
+        hostname = urllib.parse.urlsplit(url).hostname or ""
+    except Exception:
         return False
-    host = m.group(1).lower()
-    return host in ("localhost", "127.0.0.1")
+    # urlsplit().hostname strips brackets from IPv6 and lowercases
+    return hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
 
 
 def _boot_and_verify(claim, root, url, want_status, want_body, cfg):
     """Try to find a serve command, boot the server, verify, then teardown."""
     import os
     import sys
-    import shlex
     import subprocess
     import time
     import json
@@ -92,19 +103,23 @@ def _boot_and_verify(claim, root, url, want_status, want_body, cfg):
         )
 
     # Boot
+    import tempfile
+    stderr_file = tempfile.NamedTemporaryFile(delete=False, suffix=".stderr")
+    stderr_file.close()
+
     kwargs = {
         "cwd": str(root_path),
-        "stdout": subprocess.PIPE,
-        "stderr": subprocess.PIPE,
+        "stdout": subprocess.DEVNULL,
+        "stderr": open(stderr_file.name, "wb"),
     }
     if sys.platform == "win32":
-        cmd = shlex.split(serve_cmd, posix=False)
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
-        cmd = shlex.split(serve_cmd)
         kwargs["start_new_session"] = True
 
+    cmd = _split_serve(serve_cmd)
     p = subprocess.Popen(cmd, **kwargs)
+    _stderr_handle = kwargs["stderr"]
     try:
         # Poll until ready (max 30s)
         deadline = time.time() + 30
@@ -119,7 +134,8 @@ def _boot_and_verify(claim, root, url, want_status, want_body, cfg):
 
         if not ready:
             try:
-                stderr_out = p.stderr.read(1000).decode("utf-8", "ignore") if p.stderr else ""
+                _stderr_handle.flush()
+                stderr_out = Path(stderr_file.name).read_bytes()[:1000].decode("utf-8", "ignore")
             except Exception:
                 stderr_out = ""
             return Result(
@@ -131,6 +147,11 @@ def _boot_and_verify(claim, root, url, want_status, want_body, cfg):
         # Evaluate verdict
         return _evaluate(claim, url, code, body, want_status, want_body)
     finally:
+        # Close stderr file handle before killing so the process can flush
+        try:
+            _stderr_handle.close()
+        except Exception:
+            pass
         # Always teardown
         try:
             if sys.platform == "win32":
@@ -144,6 +165,11 @@ def _boot_and_verify(claim, root, url, want_status, want_body, cfg):
             pass
         try:
             p.wait(timeout=5)
+        except Exception:
+            pass
+        # Clean up temp stderr file
+        try:
+            os.unlink(stderr_file.name)
         except Exception:
             pass
 

@@ -67,6 +67,8 @@ def main(argv=None):
     v.add_argument("--transcript", required=False, default="")
     v.add_argument("--root", default=".")
     v.add_argument("--session", default=None, help="Session ID for outcome recording")
+    v.add_argument("--out-dir", default=".", dest="out_dir",
+                   help="Directory to write proof-report.md (default: current dir)")
     st = sub.add_parser("stats")
     st.add_argument("--days", type=int, default=None)
     st.add_argument("--json", action="store_true", default=False)
@@ -85,6 +87,7 @@ def main(argv=None):
     if args.cmd == "verify":
         from proofkit.verdict import run_verify  # added in M2/M4
         return run_verify(transcript=args.transcript, root=args.root,
+                          out_dir=getattr(args, "out_dir", "."),
                           session_id=getattr(args, "session", None))
     if args.cmd == "stats":
         return _cmd_stats(args)

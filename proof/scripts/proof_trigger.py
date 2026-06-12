@@ -11,8 +11,8 @@ from proofkit.config import load_config, cfg_get
 DIRECTIVE = (
     "PROOF: you just claimed work is complete. Do NOT stop. Spawn an INDEPENDENT "
     "verifier subagent (Task tool) that follows references/verifier-subagent.md: it "
-    "must run `python {script} verify --transcript \"{tp}\" --root \"{cwd}\""
-    " --session \"{sid}\"`, assume your claims may "
+    "must run `python \"{script}\" verify --transcript \"{tp}\" --root \"{cwd}\""
+    " --session \"{sid}\" --out-dir \"{cwd}\"`, assume your claims may "
     "be false, trust only execution output, and report the PASS/FAIL/INCONCLUSIVE "
     "verdict with receipts. If FAIL, fix the issues and let Proof re-verify."
 )
