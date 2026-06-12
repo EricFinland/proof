@@ -70,6 +70,9 @@ def main(argv=None):
     st.add_argument("--days", type=int, default=None)
     st.add_argument("--json", action="store_true", default=False)
     st.add_argument("--root", default=None)
+    ck = sub.add_parser("check")
+    ck.add_argument("claim", help="Claim text to verify")
+    ck.add_argument("--root", default=".")
     args = ap.parse_args(argv)
 
     if args.cmd == "arm":
@@ -83,6 +86,9 @@ def main(argv=None):
         return run_verify(transcript=args.transcript, root=args.root)
     if args.cmd == "stats":
         return _cmd_stats(args)
+    if args.cmd == "check":
+        from proofkit.verdict import run_check
+        return run_check(claim_text=args.claim, root=args.root)
     return 1
 
 if __name__ == "__main__":
