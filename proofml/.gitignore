@@ -1,0 +1,8 @@
+artifacts/*
+!artifacts/.gitkeep
+bench/*
+!bench/.gitkeep
+data/*.jsonl
+__pycache__/
+*.pyc
+.pytest_cache/
