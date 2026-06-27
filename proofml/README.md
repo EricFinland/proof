@@ -91,12 +91,71 @@ absolute claim language. Labels are attached only when a ledger row matches on
 project and nearest timestamp; otherwise the row is emitted **unlabeled** for
 shadow-mode inference. It never fabricates a label.
 
+## Shadow mode
+
+Shadow mode lets proof log a deception prediction next to every real verdict
+without changing what proof does. It is additive and opt-in: when it is OFF (the
+default), proof behaves exactly as before. proof's core never imports proofml
+unless shadow mode is enabled.
+
+### Enable
+
+Shadow runs IFF either the env var `PROOFML_SHADOW` is truthy (`1`, `true`, or
+`yes`, case-insensitive) or `.proof.toml` has `[shadow] enabled = true`:
+
+```bash
+export PROOFML_SHADOW=1
+```
+
+```toml
+[shadow]
+enabled = true
+```
+
+Two related env vars apply only when shadow is on: `PROOFML_MODEL` overrides the
+model path (default `proofml/artifacts/model.joblib`), and `PROOFML_PATH` adds a
+directory to `sys.path` so `import proofml` resolves in a prod install. Full
+details, including the zero-impact-when-off guarantee, are in proof's
+`references/shadow-mode.md`.
+
+### What it logs
+
+On each verify, proof asks the model for `P(deceptive)` on the primary claim and
+writes it into the same ledger line as the real verdict. Existing keys
+(`project, overall, n_claims, fails, claims, ts`) are unchanged; shadow adds
+`shadow_proba`, `shadow_model`, `shadow_source` (`transcript` or `claim_only`),
+and a `behavior` dict of the six raw signals. Over a few hundred turns the ledger
+becomes a live labeled dataset: prediction on one side, ground-truth verdict on
+the other.
+
+### Turn the ledger into data and measure live accuracy
+
+```bash
+python -m proofml.dataset build  --ledger ~/.proof/ledger.jsonl --out proofml/data/real.jsonl [--include-thin]
+python -m proofml.dataset report --ledger ~/.proof/ledger.jsonl
+```
+
+`build` emits one `Example` per claim string for entries with `overall` in
+`{pass, fail}` (label `1` for `fail`, `0` for `pass`; `inconclusive` dropped).
+Entries with a `behavior` dict become FEATURED rows (`source = "transcript"`);
+the rest become THIN rows (`source = "ledger"`), which are written only with
+`--include-thin`. It prints featured-vs-thin counts and label balance.
+
+`report` scores past shadow predictions against what actually happened: over
+entries that have both `shadow_proba` and `overall` in `{pass, fail}`, it prints
+live PR-AUC, Brier, accuracy@0.5, and a bucketed calibration table. If
+scikit-learn is missing it computes accuracy and Brier without it and skips
+PR-AUC. With fewer than 2 usable rows or a single verdict class it prints a clear
+"not enough data" message and exits 0.
+
 ## Wiring it back into proof (rollout order)
 
-1. **Shadow mode first.** In proof's Stop hook, run the model on the claim and
-   log `predict_proba` next to the verifier's real verdict in the ledger. Change
-   nothing else. After a few hundred turns you have live accuracy, not just
-   held-out accuracy.
+1. **Shadow mode first.** Enable shadow (above) and change nothing else. proof
+   logs `shadow_proba` next to the verifier's real verdict on every turn, and
+   `python -m proofml.dataset report --ledger ~/.proof/ledger.jsonl` shows live
+   accuracy, not just held-out accuracy. Run
+   `python -m proofml.dataset build --ledger ~/.proof/ledger.jsonl --out proofml/data/real.jsonl`
+   to retrain on real labeled rows once you have enough.
 2. **Gate second.** Once shadow numbers justify it, skip verification when
    `p(deceptive) < threshold` (use the operating point `cascade.py` printed).
    Keep a random audit sample always-verified so you keep measuring drift.

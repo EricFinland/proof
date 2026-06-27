@@ -80,7 +80,7 @@ def _build_json_payload(results, overall, report_path):
     }
 
 
-def _execute_claims(claims, root, out_dir, project=None, as_json=False):
+def _execute_claims(claims, root, out_dir, project=None, as_json=False, transcript=""):
     """Run all claims through their strategies, write report, append ledger, print verdict.
 
     Returns an exit code int: 0=pass, 1=fail, 2=inconclusive.
@@ -111,6 +111,21 @@ def _execute_claims(claims, root, out_dir, project=None, as_json=False):
             "fails": [r.method for r in results if r.verdict == "fail"],
             "claims": [r.claim[:120] for r in results],
         }
+        # Shadow mode (opt-in, additive): when enabled, enrich the ledger entry
+        # with a deception prediction. Guarded so it can never affect the
+        # verdict, exit code, or printed output. When OFF, maybe_predict returns
+        # None and the entry is byte-for-byte what it was before.
+        try:
+            from proofkit.shadow import maybe_predict
+            primary_claim = results[0].claim if results else ""
+            sh = maybe_predict(primary_claim, transcript=transcript, root=root)
+            if sh:
+                entry["shadow_proba"] = sh["proba"]
+                entry["shadow_model"] = sh["model"]
+                entry["shadow_source"] = sh["source"]
+                entry["behavior"] = sh["behavior"]
+        except Exception:
+            pass
         _ledger.append_entry(entry)
     except Exception:
         pass
@@ -143,7 +158,8 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
     _config_fill(claims, root, cfg)
     exit_code = _execute_claims(claims, root, out_dir,
                                 project=Path(root).resolve().name,
-                                as_json=as_json)
+                                as_json=as_json,
+                                transcript=transcript)
 
     # Record outcome into marker when called with a session_id (e.g. from trigger directive).
     if session_id and msg:

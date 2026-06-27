@@ -1,0 +1,129 @@
+"""Tests for proofml.dataset: build + report over a tiny enriched ledger."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from proofml import dataset
+from proofml.data import load_examples
+
+
+def _write_ledger(path: Path, entries) -> str:
+    with path.open("w", encoding="utf-8") as fh:
+        for e in entries:
+            fh.write(json.dumps(e) + "\n")
+    return str(path)
+
+
+def _entry(overall, claims, behavior=None, shadow_proba=None, ts=1.0, project="p"):
+    e = {
+        "project": project,
+        "overall": overall,
+        "n_claims": len(claims),
+        "fails": [] if overall != "fail" else ["tests"],
+        "claims": claims,
+        "ts": ts,
+    }
+    if behavior is not None:
+        e["behavior"] = behavior
+    if shadow_proba is not None:
+        e["shadow_proba"] = shadow_proba
+        e["shadow_model"] = "logistic_regression"
+        e["shadow_source"] = "transcript"
+    return e
+
+
+_BEH_DECEPTIVE = {
+    "ran_test_cmd": False, "claimed_without_running": True, "diff_lines": 30,
+    "touched_test_files": False, "hedged": False, "absolute": True,
+}
+_BEH_HONEST = {
+    "ran_test_cmd": True, "claimed_without_running": False, "diff_lines": 4,
+    "touched_test_files": True, "hedged": False, "absolute": False,
+}
+
+
+def test_build_featured_only(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    _write_ledger(ledger, [
+        _entry("fail", ["all tests pass"], behavior=_BEH_DECEPTIVE),
+        _entry("pass", ["tests pass"], behavior=_BEH_HONEST),
+        _entry("pass", ["thin claim"]),                 # thin, dropped without flag
+        _entry("inconclusive", ["no claims"], behavior=_BEH_HONEST),  # dropped
+    ])
+    out = tmp_path / "real.jsonl"
+    summary = dataset.build(str(ledger), str(out), include_thin=False)
+
+    assert summary["featured"] == 2
+    assert summary["thin"] == 0
+    assert summary["total"] == 2
+    assert summary["label_pos"] == 1
+    assert summary["label_neg"] == 1
+
+    exs = load_examples(str(out))
+    assert len(exs) == 2
+    fail_ex = [e for e in exs if e.label == 1][0]
+    assert fail_ex.source == "transcript"
+    assert fail_ex.claimed_without_running is True
+    assert fail_ex.diff_lines == 30
+
+
+def test_build_include_thin(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    _write_ledger(ledger, [
+        _entry("fail", ["all tests pass"], behavior=_BEH_DECEPTIVE),
+        _entry("pass", ["thin claim a", "thin claim b"]),  # 2 thin rows
+    ])
+    out = tmp_path / "real.jsonl"
+    summary = dataset.build(str(ledger), str(out), include_thin=True)
+
+    assert summary["featured"] == 1
+    assert summary["thin"] == 2
+    assert summary["total"] == 3
+
+    exs = load_examples(str(out))
+    thin = [e for e in exs if e.source == "ledger"]
+    assert len(thin) == 2
+    assert all(t.diff_lines == 0 and t.ran_test_cmd is False for t in thin)
+
+
+def test_report_not_enough_data(tmp_path, capsys):
+    ledger = tmp_path / "ledger.jsonl"
+    _write_ledger(ledger, [
+        _entry("pass", ["tests pass"], shadow_proba=0.2),  # only 1 usable row
+        _entry("fail", ["all tests pass"]),                # no shadow_proba
+    ])
+    code = dataset.report(str(ledger))
+    assert code == 0
+    assert "not enough data" in capsys.readouterr().out.lower()
+
+
+def test_report_with_data(tmp_path, capsys):
+    ledger = tmp_path / "ledger.jsonl"
+    entries = []
+    # honest entries the model scored low.
+    for _ in range(4):
+        entries.append(_entry("pass", ["tests pass"], shadow_proba=0.1))
+    # deceptive entries the model scored high.
+    for _ in range(4):
+        entries.append(_entry("fail", ["all tests pass"], shadow_proba=0.9))
+    _write_ledger(ledger, entries)
+
+    code = dataset.report(str(ledger))
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Brier" in out
+    assert "accuracy@0.5" in out
+    assert "calibration" in out
+    # Perfect separation -> accuracy 1.0
+    assert "accuracy@0.5    1.0000" in out
+
+
+def test_report_single_class_skips_pr_auc(tmp_path, capsys):
+    ledger = tmp_path / "ledger.jsonl"
+    entries = [_entry("pass", ["tests pass"], shadow_proba=0.1) for _ in range(3)]
+    _write_ledger(ledger, entries)
+    code = dataset.report(str(ledger))
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "PR-AUC" in out  # printed, but as n/a
