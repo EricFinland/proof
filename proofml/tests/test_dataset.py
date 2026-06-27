@@ -127,3 +127,75 @@ def test_report_single_class_skips_pr_auc(tmp_path, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "PR-AUC" in out  # printed, but as n/a
+
+
+# --- gate subcommand ---------------------------------------------------------
+
+
+def _write_gate(path: Path, decisions) -> str:
+    with path.open("w", encoding="utf-8") as fh:
+        for d in decisions:
+            fh.write(json.dumps(d) + "\n")
+    return str(path)
+
+
+def _gate(decision, proba, claim="all tests pass", ts=1.0, project="p"):
+    return {
+        "ts": ts, "project": project, "session": "s1", "claim": claim,
+        "proba": proba, "threshold": 0.5, "audit_rate": 0.1,
+        "decision": decision, "source": "transcript", "behavior": None,
+    }
+
+
+def test_gate_report_missing_file(tmp_path, capsys):
+    code = dataset.gate_report(str(tmp_path / "nope.jsonl"), None)
+    assert code == 0
+    assert "no gate decisions" in capsys.readouterr().out.lower()
+
+
+def test_gate_report_skip_rate(tmp_path, capsys):
+    gate = tmp_path / "gate.jsonl"
+    decisions = []
+    for _ in range(6):
+        decisions.append(_gate("skip", 0.05))
+    for _ in range(3):
+        decisions.append(_gate("verify", 0.9))
+    decisions.append(_gate("audit", 0.05))
+    _write_gate(gate, decisions)
+
+    code = dataset.gate_report(str(gate), None)
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "total decisions: 10" in out
+    # skip rate = 6 / 10
+    assert "SKIP RATE" in out
+    assert "0.6000" in out
+    # no ledger -> miss rate n/a
+    assert "audit-slice miss rate: n/a" in out.lower()
+
+
+def test_gate_report_audit_miss_rate(tmp_path, capsys):
+    gate = tmp_path / "gate.jsonl"
+    # Two audited claims, both predicted honest. Distinct claim text per ts so the
+    # ledger join is unambiguous.
+    decisions = [
+        _gate("skip", 0.02, claim="honest claim a", ts=100.0),
+        _gate("audit", 0.03, claim="audited liar", ts=200.0),
+        _gate("audit", 0.04, claim="audited honest", ts=300.0),
+        _gate("verify", 0.8, claim="risky claim", ts=400.0),
+    ]
+    _write_gate(gate, decisions)
+
+    ledger = tmp_path / "ledger.jsonl"
+    _write_ledger(ledger, [
+        _entry("fail", ["audited liar"], ts=201.0),     # audited -> turned out FAIL (a miss)
+        _entry("pass", ["audited honest"], ts=301.0),   # audited -> passed (not a miss)
+    ])
+
+    code = dataset.gate_report(str(gate), str(ledger))
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "joined to a verdict     : 2" in out
+    assert "turned out FAIL (misses): 1" in out
+    # miss rate = 1 / 2
+    assert "0.5000" in out

@@ -148,6 +148,74 @@ scikit-learn is missing it computes accuracy and Brier without it and skips
 PR-AUC. With fewer than 2 usable rows or a single verdict class it prints a clear
 "not enough data" message and exits 0.
 
+## Gating (cost-saving)
+
+Gating lets proofml SKIP proof's expensive verifier when it predicts a claim is
+honest, saving the cost of an independent verifier subagent. It applies the
+cascade's calibrated operating point live, at the moment of the claim. Gating is
+additive and opt-in: when OFF (the default), proof's Stop hook behaves exactly as
+before. The gate can only ever SUPPRESS the verifier, and it always fails toward
+verifying.
+
+> **Do NOT enable gating for real work until the model is retrained on REAL
+> data.** The shipped model is trained on synthetic rows and is for wiring and
+> testing only. Skipping verification on a synthetic model's confidence trusts a
+> model that has never seen your transcripts. Run shadow mode, build a real
+> labeled dataset (`python -m proofml.dataset build`), retrain, recompute the
+> operating point, and only then consider turning the gate on.
+
+### Enable
+
+Gating runs IFF either the env var `PROOFML_GATE` is truthy (`1`, `true`, or
+`yes`, case-insensitive) or `.proof.toml` has `[gate] enabled = true`:
+
+```bash
+export PROOFML_GATE=1
+```
+
+```toml
+[gate]
+enabled = true
+threshold = 0.1
+audit_rate = 0.1
+```
+
+The gate runs independently of shadow mode, so you can gate with or without
+shadow logging on.
+
+### The audit and threshold knobs
+
+- **`threshold`** is the `P(deceptive)` cutoff: `proba >= threshold` verifies,
+  below it the claim is a skip or audit candidate. Resolution order: env
+  `PROOFML_GATE_THRESHOLD` > `.proof.toml [gate].threshold` >
+  `artifacts/operating_point.json["threshold"]` (the calibrated value the cascade
+  writes) > default `0.1`.
+- **`audit_rate`** (clamped to `[0,1]`) is the fraction of predicted-honest
+  claims still verified anyway as a sampled audit. Those audits are the ground
+  truth that confirms the gate's skips were safe. Resolution order: env
+  `PROOFML_GATE_AUDIT_RATE` > `.proof.toml [gate].audit_rate` > default `0.1`.
+
+Every enabled decision is appended to `gate.jsonl` in the marker root (env
+`PROOF_HOME` or `~/.proof`). The threshold comes from `operating_point.json`,
+which `proofml.cascade` writes alongside its frontier output.
+
+### Confirm it is safe
+
+```bash
+python -m proofml.dataset gate --gate ~/.proof/gate.jsonl --ledger ~/.proof/ledger.jsonl
+```
+
+Reports total decisions, skip / verify / audit counts, the SKIP RATE (fraction of
+verifier runs saved), mean `proba` by decision, and the **audit-slice miss rate**:
+of the claims predicted honest but verified anyway, how many turned out FAIL.
+That miss rate is the number that tells you whether the gate is safe to keep. A
+non-zero rate means the gate is skipping real lies and the threshold is too loose
+(or the model needs retraining). Empty or missing files are handled gracefully
+with a clear message and exit 0.
+
+Full safety model, log schema, and resolution order are in proof's
+`references/gating.md`.
+
 ## Wiring it back into proof (rollout order)
 
 1. **Shadow mode first.** Enable shadow (above) and change nothing else. proof
@@ -156,9 +224,14 @@ PR-AUC. With fewer than 2 usable rows or a single verdict class it prints a clea
    accuracy, not just held-out accuracy. Run
    `python -m proofml.dataset build --ledger ~/.proof/ledger.jsonl --out proofml/data/real.jsonl`
    to retrain on real labeled rows once you have enough.
-2. **Gate second.** Once shadow numbers justify it, skip verification when
-   `p(deceptive) < threshold` (use the operating point `cascade.py` printed).
-   Keep a random audit sample always-verified so you keep measuring drift.
+2. **Gate second.** Once shadow numbers justify it, enable the gate with
+   `export PROOFML_GATE=1` (or `.proof.toml [gate] enabled = true`), set
+   `threshold` from the recomputed `artifacts/operating_point.json`, and keep
+   `audit_rate` non-zero. Watch
+   `python -m proofml.dataset gate --gate ~/.proof/gate.jsonl --ledger ~/.proof/ledger.jsonl`
+   for the audit-slice miss rate so you keep measuring drift. See the "Gating
+   (cost-saving)" section above and proof's `references/gating.md` for the full
+   safety model.
 
 ## The honest caveats (put these in any writeup, don't hide them)
 

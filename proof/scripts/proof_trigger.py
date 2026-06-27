@@ -43,6 +43,26 @@ def main():
         if not should_block(session, msg, max_cycles=max_cycles, root=marker_root):
             return
 
+        # Cost-gated verification (opt-in, fail-safe). Only ever skip the FIRST
+        # verification of a claim (prior_outcome is None); never skip a
+        # re-verification after a prior fail/inconclusive. Any error falls
+        # through to normal blocking below.
+        try:
+            prior = last_outcome(session, msg, root=marker_root)
+            if prior is None:
+                from proofkit.gate import decide
+                g = decide(
+                    msg,
+                    transcript=tp,
+                    root=str(cwd_path),
+                    session=session,
+                    marker_root=marker_root,
+                )
+                if g and g.get("decision") == "skip":
+                    return  # trust the claim; skip the verifier (logged in gate.jsonl)
+        except Exception:
+            pass  # fail-safe: fall through to normal blocking
+
         # Record that we are making an attempt now
         record_attempt(session, msg, root=marker_root)
         current_attempts = attempts(session, msg, root=marker_root)

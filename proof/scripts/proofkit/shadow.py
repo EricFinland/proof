@@ -62,16 +62,19 @@ def _import_shadow():
         return None
 
 
-def maybe_predict(claim: str, transcript: str = "", root: str = "."):
-    """Run a shadow prediction iff shadow mode is enabled. Never raises.
+def predict_now(claim: str, transcript: str = "", root: str = "."):
+    """Run a proofml shadow prediction WITHOUT any trigger check. Never raises.
 
-    Returns the proofml.shadow.predict dict, or None when shadow mode is off,
-    proofml is unavailable, or anything goes wrong. The caller treats a None
-    result as "no shadow data" and leaves the ledger entry untouched.
+    This is the lower half of maybe_predict: it lazily imports proofml.shadow
+    (with the PROOFML_PATH fallback) and calls predict. It performs NO enabled/
+    trigger check of its own, so a caller that has already decided to predict
+    (e.g. the cost gate, which has its own [gate] trigger) can use it regardless
+    of the PROOFML_SHADOW setting.
+
+    Returns the proofml.shadow.predict dict, or None when proofml is unavailable,
+    the model is missing, or anything goes wrong.
     """
     try:
-        if not is_enabled(root):
-            return None
         shadow = _import_shadow()
         if shadow is None:
             return None
@@ -79,5 +82,23 @@ def maybe_predict(claim: str, transcript: str = "", root: str = "."):
         if isinstance(result, dict):
             return result
         return None
+    except Exception:
+        return None
+
+
+def maybe_predict(claim: str, transcript: str = "", root: str = "."):
+    """Run a shadow prediction iff shadow mode is enabled. Never raises.
+
+    Returns the proofml.shadow.predict dict, or None when shadow mode is off,
+    proofml is unavailable, or anything goes wrong. The caller treats a None
+    result as "no shadow data" and leaves the ledger entry untouched.
+
+    External behavior is unchanged: this is exactly the previous trigger check
+    followed by the prediction, now delegated to predict_now.
+    """
+    try:
+        if not is_enabled(root):
+            return None
+        return predict_now(claim, transcript=transcript, root=root)
     except Exception:
         return None

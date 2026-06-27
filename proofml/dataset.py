@@ -257,6 +257,168 @@ def report(ledger_path: Optional[str]) -> int:
     return 0
 
 
+def _read_jsonl(path: Optional[str]) -> List[dict]:
+    """Read a generic jsonl file into dicts, skipping junk. Missing file -> []."""
+    if not path:
+        return []
+    p = Path(path)
+    if not p.exists():
+        return []
+    out: List[dict] = []
+    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
+def _nearest_verdict(
+    decision: dict, ledger: List[dict], window: float = 86400.0
+) -> Optional[str]:
+    """Find the real verdict (overall) for a gate decision via project+claim+ts.
+
+    Joins on matching project AND claim text, picking the ledger entry whose ts
+    is closest to the decision's ts within `window` seconds. The gate logs claim
+    truncated to 120 chars, so we match a ledger claim if either is a prefix of
+    the other. Returns "pass"/"fail"/"inconclusive" or None when no match.
+    """
+    proj = decision.get("project")
+    claim = decision.get("claim") or ""
+    d_ts = decision.get("ts")
+    try:
+        d_ts = float(d_ts) if d_ts is not None else None
+    except (TypeError, ValueError):
+        d_ts = None
+
+    best = None
+    best_dt = None
+    for e in ledger:
+        if proj is not None and e.get("project") != proj:
+            continue
+        e_claims = e.get("claims", []) or []
+        matched = False
+        for c in e_claims:
+            if not isinstance(c, str):
+                continue
+            if c == claim or c.startswith(claim) or claim.startswith(c):
+                matched = True
+                break
+        if not matched:
+            continue
+        overall = e.get("overall")
+        if overall not in ("pass", "fail", "inconclusive"):
+            continue
+        if d_ts is None:
+            # No ts to compare; take first structural match.
+            return overall
+        e_ts = e.get("ts")
+        try:
+            e_ts = float(e_ts)
+        except (TypeError, ValueError):
+            continue
+        dt = abs(e_ts - d_ts)
+        if dt > window:
+            continue
+        if best_dt is None or dt < best_dt:
+            best_dt = dt
+            best = overall
+    return best
+
+
+def gate_report(gate_path: Optional[str], ledger_path: Optional[str]) -> int:
+    """Report gate skip rate + audit-slice miss rate. Returns exit code (0)."""
+    decisions = _read_jsonl(gate_path)
+    if not decisions:
+        print("no gate decisions found at %s (nothing to report)."
+              % (gate_path or "(default)"))
+        return 0
+
+    n_total = len(decisions)
+    by_decision: Dict[str, int] = {"skip": 0, "verify": 0, "audit": 0}
+    proba_sum: Dict[str, float] = {"skip": 0.0, "verify": 0.0, "audit": 0.0}
+    proba_n: Dict[str, int] = {"skip": 0, "verify": 0, "audit": 0}
+
+    for d in decisions:
+        dec = d.get("decision")
+        if dec not in by_decision:
+            # Unknown decision label; count under its own key for transparency.
+            by_decision[dec] = by_decision.get(dec, 0) + 1
+            continue
+        by_decision[dec] += 1
+        p = d.get("proba")
+        if p is not None:
+            try:
+                proba_sum[dec] += float(p)
+                proba_n[dec] += 1
+            except (TypeError, ValueError):
+                pass
+
+    n_skip = by_decision.get("skip", 0)
+    n_verify = by_decision.get("verify", 0)
+    n_audit = by_decision.get("audit", 0)
+    denom = n_skip + n_verify + n_audit
+    skip_rate = (n_skip / denom) if denom else 0.0
+
+    print("proofml.dataset gate -- cost-gate safety report")
+    print("=" * 52)
+    print("total decisions: %d" % n_total)
+    print("  skip   : %d" % n_skip)
+    print("  verify : %d" % n_verify)
+    print("  audit  : %d" % n_audit)
+    print("-" * 52)
+    print("SKIP RATE (verifier runs saved): %.4f" % skip_rate)
+    print("  = skip / (skip + verify + audit) = %d / %d" % (n_skip, denom))
+    print("-" * 52)
+    print("mean proba by decision:")
+    for dec in ("skip", "verify", "audit"):
+        if proba_n[dec]:
+            print("  %-7s %.4f (n=%d)" % (dec, proba_sum[dec] / proba_n[dec], proba_n[dec]))
+        else:
+            print("  %-7s %s" % (dec, "n/a"))
+    print("-" * 52)
+
+    # SAFETY: on the audited slice (claims predicted honest but verified anyway),
+    # how many actually FAILED? Those are gate MISSES (false negatives) the gate
+    # would have wrongly skipped. This is the number that says whether the gate is
+    # safe to keep.
+    ledger = _read_jsonl(ledger_path)
+    if not ledger:
+        print("audit-slice miss rate: n/a (no ledger provided; pass --ledger "
+              "to join audited claims to their real verdict).")
+        return 0
+
+    audited = [d for d in decisions if d.get("decision") == "audit"]
+    n_joined = 0
+    n_miss = 0  # audited claims that turned out FAIL (the gate would have missed)
+    for d in audited:
+        verdict = _nearest_verdict(d, ledger)
+        if verdict is None:
+            continue
+        n_joined += 1
+        if verdict == "fail":
+            n_miss += 1
+
+    if n_joined == 0:
+        print("audit-slice miss rate: n/a (no audited claims joined to a "
+              "ledger verdict).")
+        return 0
+
+    miss_rate = n_miss / n_joined
+    print("AUDIT-SLICE SAFETY (claims predicted honest, verified anyway):")
+    print("  audited decisions       : %d" % len(audited))
+    print("  joined to a verdict     : %d" % n_joined)
+    print("  turned out FAIL (misses): %d" % n_miss)
+    print("  audit-slice MISS RATE   : %.4f" % miss_rate)
+    print("  (estimated rate the gate would wrongly skip a real lie.)")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m proofml.dataset",
@@ -278,6 +440,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                           help="Path to the enriched ledger.jsonl "
                                "(default: $PROOF_HOME/ledger.jsonl or ~/.proof/ledger.jsonl).")
 
+    p_gate = sub.add_parser("gate", help="Cost-gate skip rate + audit-slice miss rate.")
+    p_gate.add_argument("--gate", required=True,
+                        help="Path to the gate decision log gate.jsonl.")
+    p_gate.add_argument("--ledger", default=None,
+                        help="Optional ledger.jsonl to join audited claims to "
+                             "their real verdict (enables the audit-slice miss rate).")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "build":
@@ -291,6 +460,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.cmd == "report":
         return report(args.ledger)
+
+    if args.cmd == "gate":
+        return gate_report(args.gate, args.ledger)
 
     return 0
 

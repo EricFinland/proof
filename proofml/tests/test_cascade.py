@@ -206,3 +206,63 @@ def test_run_cascade_end_to_end_with_stub_model(tmp_path, monkeypatch):
     assert op["recall"] >= 1.0 - 1e-9
     assert op["skip_rate"] > 0.0  # honest rows should be skippable
     assert Path(saved).exists()
+
+    # operating_point.json is written additively with a numeric threshold.
+    import json as _json
+
+    op_file = art / "operating_point.json"
+    assert op_file.exists()
+    payload = _json.loads(op_file.read_text(encoding="utf-8"))
+    assert isinstance(payload["threshold"], float)
+    assert payload["min_recall"] == 1.0
+    assert payload["recall"] >= 1.0 - 1e-9
+    assert payload["skip_rate"] > 0.0
+    assert payload["n_held"] > 0
+
+
+def test_run_cascade_writes_null_threshold_when_unreachable(tmp_path, monkeypatch):
+    """When no operating point meets min_recall, threshold is written as null."""
+    import json as _json
+
+    import numpy as _np
+
+    from proofml.data import write_examples
+
+    examples = []
+    for i in range(20):
+        deceptive = i % 2 == 0
+        examples.append(
+            Example(
+                claim="all tests pass" if deceptive else "ran pytest, ok",
+                label=1 if deceptive else 0,
+                source="synth",
+                claimed_without_running=deceptive,
+            )
+        )
+    data_path = tmp_path / "examples.jsonl"
+    write_examples(examples, str(data_path))
+
+    art = tmp_path / "artifacts"
+    art.mkdir()
+
+    # Stub model that cannot separate the classes: everything scores 0.5, so no
+    # threshold can reach recall 1.0 while skipping anything.
+    class FlatModel:
+        classes_ = [0, 1]
+
+        def predict_proba(self, X):
+            n = len(_np.asarray(X))
+            return _np.column_stack([_np.full(n, 0.5), _np.full(n, 0.5)])
+
+    monkeypatch.setattr(cascade, "_load_model", lambda artifacts: FlatModel())
+
+    frontier, op, saved = cascade.run_cascade(
+        str(art), str(data_path), min_recall=1.01  # impossible -> op is None
+    )
+    assert op is None
+    op_file = art / "operating_point.json"
+    assert op_file.exists()
+    payload = _json.loads(op_file.read_text(encoding="utf-8"))
+    assert payload["threshold"] is None
+    assert payload["min_recall"] == 1.01
+    assert payload["n_held"] > 0

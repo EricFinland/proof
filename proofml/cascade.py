@@ -225,6 +225,55 @@ def _save_csv(frontier: List[dict], out_path: Path) -> str:
     return str(out_path)
 
 
+def _write_operating_point(
+    op: Optional[dict], min_recall: float, model_name: str, n_held: int, out_path: Path
+) -> str:
+    """Persist the calibrated operating point the live gate reads.
+
+    Writes artifacts/operating_point.json with the chosen threshold and the
+    cascade stats behind it. None-safe: when no operating point meets the recall
+    floor, threshold is written as null (the gate then falls back to its own
+    default and never skips on a missing/None threshold).
+    """
+    if op is not None:
+        payload = {
+            "threshold": float(op["threshold"]),
+            "min_recall": float(min_recall),
+            "recall": float(op["recall"]),
+            "skip_rate": float(op["skip_rate"]),
+            "model": model_name,
+            "n_held": int(n_held),
+            "n_lies": int(op.get("n_lies", 0)),
+        }
+    else:
+        payload = {
+            "threshold": None,
+            "min_recall": float(min_recall),
+            "recall": None,
+            "skip_rate": None,
+            "model": model_name,
+            "n_held": int(n_held),
+            "n_lies": None,
+        }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return str(out_path)
+
+
+def _model_name(artifacts: str) -> str:
+    """Best-effort model name from metrics.json chosen_model, else 'model'."""
+    try:
+        metrics = Path(artifacts) / "metrics.json"
+        if metrics.is_file():
+            data = json.loads(metrics.read_text(encoding="utf-8"))
+            name = data.get("chosen_model")
+            if isinstance(name, str) and name:
+                return name
+    except Exception:
+        pass
+    return "model"
+
+
 def _load_model(artifacts: str):
     """Load the fitted calibrated estimator saved by train.py."""
     import joblib
@@ -277,6 +326,20 @@ def run_cascade(
     op = pick_operating_point(frontier, min_recall)
 
     art_dir = Path(artifacts)
+
+    # Persist the calibrated operating point the live gate reads (additive; does
+    # not change the existing frontier outputs/metrics below).
+    op_path = art_dir / "operating_point.json"
+    model_name = _model_name(artifacts)
+    _write_operating_point(op, min_recall, model_name, len(held), op_path)
+    if op is None:
+        print(
+            "note: no operating point meets min-recall {:.1%}; wrote "
+            "operating_point.json with threshold=null (gate will not skip).".format(
+                min_recall
+            )
+        )
+
     png_path = art_dir / "cascade.png"
     if _save_png(frontier, op, png_path):
         saved = str(png_path)
