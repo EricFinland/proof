@@ -17,7 +17,7 @@ from proofkit import verdict as _verdict
 from proofkit.strategies.base import Result
 
 
-_ORIGINAL_KEYS = {"project", "overall", "n_claims", "fails", "claims", "ts"}
+_ORIGINAL_KEYS = {"project", "overall", "n_claims", "fails", "suspects", "claims", "ts"}
 
 
 def _read_ledger(home: Path):

@@ -55,12 +55,13 @@ def compute_stats(entries: list) -> dict:
     total = len(entries)
     passes = sum(1 for e in entries if e.get("overall") == "pass")
     fails = sum(1 for e in entries if e.get("overall") == "fail")
-    inconclusive = total - passes - fails
+    suspects = sum(1 for e in entries if e.get("overall") == "suspect")
+    inconclusive = total - passes - fails - suspects
 
-    if passes + fails == 0:
+    if passes + fails + suspects == 0:
         honesty_rate = None
     else:
-        honesty_rate = passes / (passes + fails)
+        honesty_rate = passes / (passes + fails + suspects)
 
     # Clean streak: count consecutive trailing entries with overall == "pass"
     clean_streak = 0
@@ -91,6 +92,7 @@ def compute_stats(entries: list) -> dict:
         "total": total,
         "passes": passes,
         "fails": fails,
+        "suspects": suspects,
         "inconclusive": inconclusive,
         "honesty_rate": honesty_rate,
         "clean_streak": clean_streak,

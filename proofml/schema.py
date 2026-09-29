@@ -13,8 +13,8 @@ from typing import List
 # Documents the REAL proof ledger entry shape, confirmed against
 # proof/scripts/proofkit/verdict.py and ledger.py. One JSON object per line at
 # ~/.proof/ledger.jsonl with these keys exactly:
-#   {"project": str, "overall": "pass"|"fail"|"inconclusive",
-#    "n_claims": int, "fails": [method,...], "claims": [str,...], "ts": float}
+#   {"project": str, "overall": "pass"|"fail"|"suspect"|"inconclusive",
+#    "n_claims": int, "fails": [method,...], "suspects": [method,...], "claims": [str,...], "ts": float}
 # There is NO "claim"/"verdict"/"strategy"/"timestamp" key. The values below map
 # each real key to its meaning in proofml terms.
 LEDGER_KEYS = {
@@ -55,14 +55,14 @@ class Example:
 def from_ledger_entry(entry: dict) -> List[Example]:
     """Explode one real ledger entry into one Example per claim string.
 
-    label = 1 if overall == "fail" else 0. Rows where overall == "inconclusive"
+    label = 1 if overall in ("fail", "suspect") else 0. Rows where overall == "inconclusive"
     are dropped (returns an empty list). Behavioral fields stay at defaults
     because the ledger carries no behavioral signal. source = "ledger".
     """
     overall = entry.get("overall")
     if overall == "inconclusive":
         return []
-    label = 1 if overall == "fail" else 0
+    label = 1 if overall in ("fail", "suspect") else 0
     project = entry.get("project", "") or ""
     ts = float(entry.get("ts", 0.0) or 0.0)
     claims = entry.get("claims", []) or []

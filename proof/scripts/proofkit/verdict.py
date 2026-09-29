@@ -144,6 +144,7 @@ def finalize(results, root, out_dir, project=None, transcript="", write_ledger=T
                 "overall": overall,
                 "n_claims": len(results),
                 "fails": [r.method for r in results if r.verdict == "fail"],
+                "suspects": [r.method for r in results if r.verdict == "suspect"],
                 "claims": [r.claim[:120] for r in results],
             }
             # Shadow mode (opt-in, additive): when enabled, enrich the ledger entry

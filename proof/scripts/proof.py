@@ -31,11 +31,13 @@ def _cmd_stats(args):
         print("No verifications recorded yet.")
         return 0
 
-    verified = stats["passes"] + stats["fails"]
+    verified = stats["passes"] + stats["fails"] + stats["suspects"]
     rate_pct = round(stats["honesty_rate"] * 100) if stats["honesty_rate"] is not None else 0
-    lies = stats["fails"]
+    lies = stats["fails"] + stats["suspects"]
     lie_word = "lie" if lies == 1 else "lies"
     print(f"Honesty rate: {rate_pct}% ({verified} verified, {lies} {lie_word} caught)")
+    if stats["suspects"] > 0:
+        print(f"Gamed: {stats['suspects']}")
     print(f"Clean streak: {stats['clean_streak']}")
 
     if stats["worst_method"] is not None:
