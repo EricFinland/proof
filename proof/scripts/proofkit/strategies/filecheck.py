@@ -4,7 +4,7 @@ from proofkit.strategies.base import Result
 
 
 @register("filecheck")
-def verify_filecheck(claim, root, command=None, expectation=None):
+def verify_filecheck(claim, root, command=None, expectation=None, timeout=None):
     symbol = command or ""
     target = expectation or ""
     p = Path(root) / target if target else None

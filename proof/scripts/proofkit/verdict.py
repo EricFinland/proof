@@ -1,22 +1,44 @@
 import json as _json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+from proofkit.strategies.base import Budget, DEFAULT_COMMAND_TIMEOUT, Result
+
+EXIT = {"pass": 0, "fail": 1, "inconclusive": 2, "suspect": 3}
+_ICON = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCONCLUSIVE",
+         "suspect": "SUSPECT", "deferred": "DEFERRED"}
+_ICON_MD = dict(_ICON)
 
 
 def aggregate(results):
-    verdicts = [r.verdict for r in results]
-    if "fail" in verdicts:
-        return "fail"
-    if "pass" in verdicts:
-        return "pass"
+    seen = {"inconclusive" if r.verdict == "deferred" else r.verdict for r in results}
+    for level in ("fail", "suspect", "pass"):
+        if level in seen:
+            return level
     return "inconclusive"
 
 
-# Unicode icons for the markdown report only.
-_ICON = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCONCLUSIVE"}
-_ICON_MD = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCONCLUSIVE"}
+@dataclass
+class Outcome:
+    overall: str
+    results: list
+    report_path: str
+    notes: list = field(default_factory=list)
+
+    @property
+    def exit_code(self):
+        return EXIT[self.overall]
+
+    @property
+    def deferred(self):
+        return [r for r in self.results if r.verdict == "deferred"]
+
+    @property
+    def unresolved(self):
+        return [r for r in self.results if r.verdict in ("deferred", "inconclusive")]
 
 
-def write_report(results, overall, out_dir="."):
+def write_report(results, overall, out_dir=".", notes=()):
     out = Path(out_dir) / "proof-report.md"
     lines = [f"# Proof Report -- {_ICON_MD[overall]}", ""]
     for r in results:
@@ -30,6 +52,8 @@ def write_report(results, overall, out_dir="."):
             "```",
             "",
         ]
+    if notes:
+        lines += ["## Notes", ""] + [f"- {n}" for n in notes] + [""]
     out.write_text("\n".join(lines), encoding="utf-8")
     return str(out)
 
@@ -61,7 +85,7 @@ def _config_fill(claims, root, cfg):
 
 def _build_json_payload(results, overall, report_path):
     """Build the standard JSON payload dict shared by verify --json and check --json."""
-    exit_code = {"pass": 0, "fail": 1, "inconclusive": 2}[overall]
+    exit_code = EXIT[overall]
     items = []
     for r in results:
         items.append({
@@ -71,6 +95,7 @@ def _build_json_payload(results, overall, report_path):
             "raw_output": r.raw_output[:2000],
             "verdict": r.verdict,
             "confidence": r.confidence,
+            "findings": [asdict(f) for f in r.findings],
         })
     return {
         "overall": overall,
@@ -80,69 +105,94 @@ def _build_json_payload(results, overall, report_path):
     }
 
 
-def _execute_claims(claims, root, out_dir, project=None, as_json=False, transcript=""):
-    """Run all claims through their strategies, write report, append ledger, print verdict.
-
-    Returns an exit code int: 0=pass, 1=fail, 2=inconclusive.
-    When as_json=True, prints one JSON object instead of ASCII verdict lines.
-    """
+def run_claims(claims, root, budget=None, command_timeout=DEFAULT_COMMAND_TIMEOUT):
+    """Run each claim through its strategy under an optional shared budget."""
     from proofkit import strategies
 
-    if project is None:
-        project = Path(root).resolve().name
-
+    strategies.load_all()
+    budget = budget or Budget(None)
     results = []
     for c in claims:
         fn = strategies.get(c.strategy)
-        if fn:
-            results.append(fn(c.raw, root=root,
-                              command=c.command or None,
-                              expectation=c.expectation or None))
-    overall = aggregate(results)
-    report_path = write_report(results, overall, out_dir=out_dir)
+        if not fn:
+            continue
+        if budget.exhausted():
+            results.append(Result(c.raw, c.strategy, c.command,
+                                  "not started: inline budget exhausted", "deferred", 0.0))
+            continue
+        results.append(fn(c.raw, root=root, command=c.command or None,
+                          expectation=c.expectation or None,
+                          timeout=budget.timeout(command_timeout)))
+    return results
 
-    # Append ledger entry; never let ledger failures affect the verdict or exit code.
-    try:
-        from proofkit import ledger as _ledger
-        entry = {
-            "project": project,
-            "overall": overall,
-            "n_claims": len(results),
-            "fails": [r.method for r in results if r.verdict == "fail"],
-            "claims": [r.claim[:120] for r in results],
-        }
-        # Shadow mode (opt-in, additive): when enabled, enrich the ledger entry
-        # with a deception prediction. Guarded so it can never affect the
-        # verdict, exit code, or printed output. When OFF, maybe_predict returns
-        # None and the entry is byte-for-byte what it was before.
+
+def finalize(results, root, out_dir, project=None, transcript="", write_ledger=True,
+             notes=None):
+    """Aggregate results, write the report, append the ledger entry. Never prints."""
+    if project is None:
+        project = Path(root).resolve().name
+    notes = notes or []
+    overall = aggregate(results)
+    report_path = write_report(results, overall, out_dir=out_dir, notes=notes)
+
+    if write_ledger:
+        # Never let ledger failures affect the verdict or exit code.
         try:
-            from proofkit.shadow import maybe_predict
-            primary_claim = results[0].claim if results else ""
-            sh = maybe_predict(primary_claim, transcript=transcript, root=root)
-            if sh:
-                entry["shadow_proba"] = sh["proba"]
-                entry["shadow_model"] = sh["model"]
-                entry["shadow_source"] = sh["source"]
-                entry["behavior"] = sh["behavior"]
+            from proofkit import ledger as _ledger
+            entry = {
+                "project": project,
+                "overall": overall,
+                "n_claims": len(results),
+                "fails": [r.method for r in results if r.verdict == "fail"],
+                "claims": [r.claim[:120] for r in results],
+            }
+            # Shadow mode (opt-in, additive): when enabled, enrich the ledger entry
+            # with a deception prediction. Guarded so it can never affect the
+            # verdict, exit code, or printed output. When OFF, maybe_predict returns
+            # None and the entry is byte-for-byte what it was before.
+            try:
+                from proofkit.shadow import maybe_predict
+                primary_claim = results[0].claim if results else ""
+                sh = maybe_predict(primary_claim, transcript=transcript, root=root)
+                if sh:
+                    entry["shadow_proba"] = sh["proba"]
+                    entry["shadow_model"] = sh["model"]
+                    entry["shadow_source"] = sh["source"]
+                    entry["behavior"] = sh["behavior"]
+            except Exception:
+                pass
+            _ledger.append_entry(entry)
         except Exception:
             pass
-        _ledger.append_entry(entry)
-    except Exception:
-        pass
 
-    exit_code = {"pass": 0, "fail": 1, "inconclusive": 2}[overall]
+    return Outcome(overall, results, report_path, notes)
 
+
+def print_outcome(outcome, as_json=False):
+    """Print the verdict to stdout: one JSON object, or ASCII lines."""
     if as_json:
-        payload = _build_json_payload(results, overall, report_path)
-        print(_json.dumps(payload))
-    else:
-        # Print ASCII-safe verdict to stdout (avoids cp1252 encoding errors on Windows).
-        print(_ICON[overall])
-        for r in results:
-            if r.verdict == "fail":
-                print(f"  FAIL {r.method}: `{r.command}`")
+        print(_json.dumps(_build_json_payload(outcome.results, outcome.overall,
+                                              outcome.report_path)))
+        return
+    # ASCII-safe verdict (avoids cp1252 encoding errors on Windows).
+    print(_ICON[outcome.overall])
+    for r in outcome.results:
+        if r.verdict == "fail":
+            print(f"  FAIL {r.method}: `{r.command}`")
+        elif r.verdict == "suspect":
+            for line in r.raw_output.splitlines()[1:]:
+                print(f"  SUSPECT {r.method}: {line}")
 
-    return exit_code
+
+def _execute_claims(claims, root, out_dir, project=None, as_json=False, transcript=""):
+    """Run all claims, write report, append ledger, print verdict.
+
+    Returns an exit code int: 0=pass, 1=fail, 2=inconclusive, 3=suspect.
+    When as_json=True, prints one JSON object instead of ASCII verdict lines.
+    """
+    outcome = finalize(run_claims(claims, root), root, out_dir, project, transcript)
+    print_outcome(outcome, as_json)
+    return outcome.exit_code
 
 
 def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=False):
@@ -165,7 +215,7 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
     if session_id and msg:
         try:
             from proofkit.marker import record_outcome
-            verdict_map = {0: "pass", 1: "fail", 2: "inconclusive"}
+            verdict_map = {v: k for k, v in EXIT.items()}
             verdict = verdict_map.get(exit_code, "inconclusive")
             # Use PROOF_HOME env var for marker root (matches trigger behavior)
             import os

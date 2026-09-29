@@ -65,7 +65,7 @@ def _is_local(url):
     return hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
 
 
-def _boot_and_verify(claim, root, url, want_status, want_body, cfg):
+def _boot_and_verify(claim, root, url, want_status, want_body, cfg, timeout=None):
     """Try to find a serve command, boot the server, verify, then teardown."""
     import os
     import sys
@@ -121,8 +121,9 @@ def _boot_and_verify(claim, root, url, want_status, want_body, cfg):
     p = subprocess.Popen(cmd, **kwargs)
     _stderr_handle = kwargs["stderr"]
     try:
-        # Poll until ready (max 30s)
-        deadline = time.time() + 30
+        # Poll until ready (max 30s, or the caller's timeout when smaller)
+        wait = 30 if timeout is None else min(30, timeout)
+        deadline = time.time() + wait
         ready = False
         while time.time() < deadline:
             try:
@@ -140,7 +141,7 @@ def _boot_and_verify(claim, root, url, want_status, want_body, cfg):
                 stderr_out = ""
             return Result(
                 claim, "http", url,
-                f"server did not become ready within 30s. stderr: {stderr_out}",
+                f"server did not become ready within {wait:g}s. stderr: {stderr_out}",
                 "inconclusive", 0.3,
             )
 
@@ -183,7 +184,7 @@ def _evaluate(claim, url, code, body, want_status, want_body):
 
 
 @register("http")
-def verify_http(claim, root, command=None, expectation=None):
+def verify_http(claim, root, command=None, expectation=None, timeout=None):
     cfg = load_config(root)
 
     # Backward-compat: command= is the URL, expectation= is the wanted status
@@ -207,7 +208,8 @@ def verify_http(claim, root, command=None, expectation=None):
         # Connection refused or unreachable
         if _is_local(url):
             # Try booting a local server
-            return _boot_and_verify(claim, root, url, want_status, want_body, cfg)
+            return _boot_and_verify(claim, root, url, want_status, want_body, cfg,
+                                    timeout=timeout)
         else:
             # Non-local URL unreachable = deployed claim is a lie
             return Result(
