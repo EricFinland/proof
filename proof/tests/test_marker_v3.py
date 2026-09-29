@@ -53,3 +53,17 @@ def test_v2_file_migrates(tmp_path):
         {"s": {m.claim_key(MSG): {"attempts": 1, "last": "fail"}}}), encoding="utf-8")
     assert m.attempts("s", MSG, root=tmp_path) == 1
     assert m.get_claim("s", m.claim_key(MSG), root=tmp_path) is None
+
+
+def test_set_pending_demotes_other_pending_in_session(tmp_path):
+    other = "Build is green now."
+    m.set_pending("s", other, ["build"], root=tmp_path)
+    m.set_pending("s2", other, ["build"], root=tmp_path)
+    m.set_pending("s", MSG, ["tests"], root=tmp_path)
+    key, entry = m.pending_entry("s", root=tmp_path)
+    assert key == m.claim_key(MSG) and entry["pending"] == ["tests"]
+    data = m._load(tmp_path)
+    demoted = data["s"][m.claim_key(other)]
+    assert demoted["last"] is None and demoted["pending"] == []
+    # other sessions are untouched
+    assert m.pending_entry("s2", root=tmp_path)[0] == m.claim_key(other)

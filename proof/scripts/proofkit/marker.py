@@ -102,9 +102,19 @@ def get_claim(session: str, key: str, root=None):
 
 
 def set_pending(session: str, msg: str, strategies, root=None) -> None:
-    """Mark a claim as pending: the listed strategies did not finish inside the budget."""
+    """Mark a claim as pending: the listed strategies did not finish inside the budget.
+
+    Any other pending claim in the same session is demoted first, so pending_entry()
+    always returns the current claim.
+    """
     data = _load(root)
-    e = _entry(data, session, claim_key(msg))
+    key = claim_key(msg)
+    for k, v in data.get(session, {}).items():
+        if (k != key and not k.startswith("_") and isinstance(v, dict)
+                and v.get("last") == "pending"):
+            v["last"] = None
+            v["pending"] = []
+    e = _entry(data, session, key)
     e["last"] = "pending"
     e["pending"] = list(strategies)
     e["claim"] = msg.strip()[:4000]
