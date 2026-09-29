@@ -1,5 +1,8 @@
 """Run diff-based analyzers for a claim. Analyzer errors never affect verdicts."""
 
+REPRO_HINT = ("no repro found for this fix claim; add or change a test, or include a "
+              "line Repro: `<command>` that failed before the fix")
+
 
 def run_analyzers(msg, claims, root, cfg, changes, budget, marker_root=None):
     results, notes = [], []
@@ -23,5 +26,17 @@ def run_analyzers(msg, claims, root, cfg, changes, budget, marker_root=None):
         _safe("tamper", lambda: tamper.to_result(msg, tamper.analyze(changes, root, cfg)))
     from proofkit import scope
     _safe("scope", lambda: scope.to_result(msg, scope.analyze(msg, changes, root)))
-    # Task 11 adds redgreen here.
+    from proofkit.classifier import is_fix_claim
+    if is_fix_claim(msg) and not changes.approximate:
+        from proofkit import redgreen
+        try:
+            spec = redgreen.find_repro(msg, changes, root, cfg)
+        except Exception as e:  # never let analysis break verification
+            spec = False
+            notes.append(f"redgreen analysis skipped: {e}")
+        if spec is None:
+            notes.append(REPRO_HINT)
+        elif spec:
+            _safe("redgreen", lambda: redgreen.run(msg, spec, root, changes.base_commit,
+                                                   budget, marker_root=marker_root))
     return results, notes

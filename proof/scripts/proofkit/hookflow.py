@@ -63,6 +63,13 @@ def _block(reason, system_message=None):
     return out
 
 
+def _with_hint(reason, notes):
+    from proofkit.analyze import REPRO_HINT
+    if REPRO_HINT in (notes or []):
+        return reason + "\n\n" + REPRO_HINT
+    return reason
+
+
 def _fail_receipts(outcome):
     parts = []
     for r in outcome.results:
@@ -144,7 +151,8 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
 
     if not results:
         marker.set_pending(session, msg, ["unstructured claim"], root=marker_root)
-        return _block(_directive(["unstructured claim"], tp, cwd, session, key))
+        return _block(_with_hint(_directive(["unstructured claim"], tp, cwd, session, key),
+                                 notes))
 
     probe_overall = _peek_overall(results)
     unresolved_only = probe_overall not in ("fail", "suspect") and any(
@@ -157,8 +165,8 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
 
     if outcome.overall == "fail":
         marker.record_outcome(session, msg, "fail", root=marker_root)
-        return _block(FAIL_HEAD.format(n=n, max=max_cycles) + _fail_receipts(outcome)
-                      + FAIL_TAIL)
+        return _block(_with_hint(FAIL_HEAD.format(n=n, max=max_cycles)
+                                 + _fail_receipts(outcome) + FAIL_TAIL, notes))
 
     system_message = None
     if outcome.overall == "suspect":
@@ -183,7 +191,8 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
     if outcome.unresolved:
         pending = sorted({r.method for r in outcome.unresolved})
         marker.set_pending(session, msg, pending, root=marker_root)
-        return _block(_directive(pending, tp, cwd, session, key), system_message)
+        return _block(_with_hint(_directive(pending, tp, cwd, session, key), notes),
+                      system_message)
 
     if outcome.overall != "suspect":
         marker.record_outcome(session, msg, outcome.overall, root=marker_root)
