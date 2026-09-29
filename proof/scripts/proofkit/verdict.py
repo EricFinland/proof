@@ -185,14 +185,23 @@ def print_outcome(outcome, as_json=False):
                 print(f"  SUSPECT {r.method}: {line}")
 
 
+def _command_timeout(cfg):
+    from proofkit.config import cfg_get
+    try:
+        return int(cfg_get(cfg, "verify", "command_timeout", default=DEFAULT_COMMAND_TIMEOUT))
+    except (TypeError, ValueError):
+        return DEFAULT_COMMAND_TIMEOUT
+
+
 def _execute_claims(claims, root, out_dir, project=None, as_json=False, transcript="",
-                    extra=None, notes=None):
+                    extra=None, notes=None, command_timeout=DEFAULT_COMMAND_TIMEOUT):
     """Run all claims, write report, append ledger, print verdict.
 
     Returns an exit code int: 0=pass, 1=fail, 2=inconclusive, 3=suspect.
     When as_json=True, prints one JSON object instead of ASCII verdict lines.
     """
-    outcome = finalize(run_claims(claims, root) + list(extra or []), root, out_dir,
+    results = run_claims(claims, root, command_timeout=command_timeout)
+    outcome = finalize(results + list(extra or []), root, out_dir,
                        project, transcript, notes=notes)
     print_outcome(outcome, as_json)
     return outcome.exit_code
@@ -225,7 +234,8 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
     exit_code = _execute_claims(claims, root, out_dir,
                                 project=Path(root).resolve().name,
                                 as_json=as_json,
-                                transcript=transcript, extra=extra, notes=notes)
+                                transcript=transcript, extra=extra, notes=notes,
+                                command_timeout=_command_timeout(cfg))
 
     # Record outcome into marker when called with a session_id (e.g. from trigger directive).
     if session_id and (msg or claim_key):
@@ -278,4 +288,5 @@ def run_check(claim_text, root=".", out_dir=".", as_json=False, since=None):
         return 2
     return _execute_claims(claims, root, out_dir,
                            project=Path(root).resolve().name,
-                           as_json=as_json, extra=extra, notes=notes)
+                           as_json=as_json, extra=extra, notes=notes,
+                           command_timeout=_command_timeout(cfg))

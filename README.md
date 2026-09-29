@@ -8,14 +8,110 @@
 
 Proof is a [Claude Code](https://docs.claude.com/en/docs/claude-code) skill plus
 Stop hook that auto-fact-checks an agent's completion claims. The moment the
-agent says "tests pass" or "all done, it works", Proof fires an *independent*
-verifier that runs the real checks and returns a strict
-**PASS / FAIL / INCONCLUSIVE** verdict with the actual command output as evidence,
-before the turn is allowed to end.
+agent says "tests pass" or "all done, it works", the hook runs the real checks
+itself, looks at what actually changed, and returns a strict
+**PASS / FAIL / SUSPECT / INCONCLUSIVE** verdict with the actual command output
+as evidence, before the turn is allowed to end.
 
 No configuration. No success criteria to write. Arm it once, then work normally.
 
 ![Proof catching a false completion claim](assets/demo.gif)
+
+## v3: receipts that can't be faked
+
+v2 asked the agent to verify itself and report back. v3 stops trusting the agent
+with any part of the loop.
+
+- **The hook runs the checks itself.** Tests, build, and endpoints run inside
+  the Stop hook under a time budget (90 seconds by default). A FAIL comes back
+  inline with the receipt. A verifier subagent is only used for the leftovers,
+  and the agent cannot skip it by stopping again.
+- **SUSPECT catches gamed tests.** Green tests prove nothing if the agent skipped
+  the failing one. Proof diffs the tree against a baseline taken when the session
+  started and flags skipped, deleted, focused, and gutted tests, and test commands
+  rigged to always pass.
+- **Red-green fix receipts.** "I fixed the bug" has to be proven: the repro must
+  fail on the session baseline and pass now.
+- **Claim vs diff.** "I added `parse_price` to `pricing.py`" when neither changed,
+  or "fixed" when only a comment changed, is SUSPECT.
+- **CI mode.** `proof check "all tests pass" --since origin/main` runs the same
+  checks over a whole branch.
+
+### SUSPECT: a skipped test, caught
+
+The suite is red. Instead of fixing the bug, the agent skips the failing test and
+claims victory. The tests really do pass now, so a plain test run would say PASS.
+Proof reads the diff:
+
+```
+$ proof check "All done, tests pass." --since HEAD
+SUSPECT
+  SUSPECT tamper: skip-added: tests/test_pricing.py:10  @pytest.mark.skip(reason="flaky on CI")
+$ echo $?
+3
+```
+
+In the Stop hook, the agent is blocked once and asked to revert or explain:
+
+```
+PROOF: the checks pass, but the change looks like it games them:
+
+skip-added: tests/test_pricing.py:10  @pytest.mark.skip(reason="flaky on CI")
+
+Revert these changes, or explain why each one is intentional. If they are
+intentional, Proof will show them to the user instead of blocking again.
+```
+
+If the agent insists, Proof does not argue. It lets the turn end and puts the
+findings in front of you:
+
+```
+Proof: SUSPECT. The agent was asked about these once and they remain. Please review:
+skip-added: tests/test_pricing.py:10  @pytest.mark.skip(reason="flaky on CI")
+```
+
+You decide. The agent does not get to.
+
+### Red-green: a fix, proven
+
+The agent adds a regression test and changes the code. Proof copies the new test
+into a temporary worktree of the session baseline and runs it there, then runs it
+on the current tree. The receipt in `proof-report.md`:
+
+```
+## PASS -- redgreen
+- Claim:   I fixed the bug: prices with thousands separators parse now, and all tests pass.
+- Command: `python -m pytest -q tests/test_pricing.py`
+
+    fix proven: repro failed before the change and passes now
+    baseline output:
+    E       ValueError: could not convert string to float: '1,200.50'
+    FAILED tests/test_pricing.py::test_parse_commas - ValueError: could not conve...
+    1 failed, 1 passed in 0.07s
+```
+
+A test that already passes on the baseline proves nothing, so that is SUSPECT:
+
+```
+SUSPECT
+  SUSPECT redgreen: repro-already-green: tests/test_pricing.py  repro passes on the baseline without your change, so it does not prove the fix
+```
+
+No changed test? Proof also accepts `[repro].command` in `.proof.toml` or a
+``Repro: `<command>` `` line in the claim, and asks for one when neither exists.
+
+### Claim vs diff
+
+```
+$ proof check "I fixed the comma bug in \`pricing.py\`." --since HEAD
+SUSPECT
+  SUSPECT scope: docs-only: pricing.py  only documentation or comments changed
+```
+
+The scope rules are `empty-change` (claims a change, nothing changed),
+`docs-only` (a fix that only touched docs or comments), `named-path-unchanged`,
+and `named-symbol-missing` (a backticked file or identifier in an "added" or
+"implemented" sentence that the diff does not contain).
 
 ## See it catch a lie
 
@@ -26,15 +122,21 @@ test suite itself and busts the claim:
 1. The agent ends its turn with a claim:
    "All done, tests pass."
 
-2. The Stop hook fires automatically and injects the verifier directive:
+2. The Stop hook runs the real check inline and blocks with the receipt:
    decision: block
-   reason:  PROOF: you just claimed work is complete. Do NOT stop. Spawn an
-            INDEPENDENT verifier subagent that runs the real checks ...
+   reason:  PROOF: your completion claim did not survive verification
+            (attempt 1 of 3).
 
-3. The independent verifier runs the REAL check:
-   FAIL
-     FAIL tests: `python -m pytest -q`
-   exit code: 1
+            FAIL tests: `python -m pytest -q`
+            E       assert 1 == 2
+            FAILED test_bad.py::test_bad - assert 1 == 2
+            1 failed in 0.05s
+
+            Fix the failing checks, then claim completion again. Proof will
+            re-verify automatically.
+
+3. The agent fixes the code and claims again. Proof re-verifies. Only a PASS
+   ends the loop.
 ```
 
 And the receipt it writes to `proof-report.md`:
@@ -62,10 +164,16 @@ the suite did not even import.
 $ proof verify --transcript turn.jsonl --root .
 FAIL
   FAIL tests: `python -m pytest -q`
+```
 
-  ERROR collecting tests/test_cli.py
-  E   ModuleNotFoundError: No module named 'mcp_audit'
-  exit code: 1
+The receipt in `proof-report.md`:
+
+```
+## FAIL -- tests
+- Command: `python -m pytest -q`
+
+    ERROR collecting tests/test_cli.py
+    E   ModuleNotFoundError: No module named 'mcp_audit'
 ```
 
 An agent that said "done, tests pass" there would have been wrong, and you would
@@ -75,9 +183,10 @@ have found out three steps later. Proof finds out immediately.
 
 Hallucinated completion is the biggest trust gap in agentic coding. The agent
 grades its own homework, so "it works" is unreliable, and you find out by hand.
-Proof breaks the loop: a separate verifier, in a fresh context, assumes every
-claim may be false and trusts only execution output. One failed check fails the
-whole turn.
+Worse, an agent under pressure to go green can make the tests pass without making
+the code work. Proof breaks the loop: deterministic checks it runs itself, a diff
+against where the session started, and no way for the agent to talk its way past
+either. One failed check fails the whole turn.
 
 ## Install
 
@@ -87,18 +196,19 @@ One line, via the [skills CLI](https://github.com/vercel-labs/skills):
 npx skills add EricFinland/proof
 ```
 
-Or grab it directly and arm the hook yourself:
+Or grab it directly and arm the hooks yourself:
 
 ```bash
 cd <your project>
 python /path/to/proof/scripts/proof.py arm
 ```
 
-Arming adds a `Stop` hook to your project's `.claude/settings.json`. Then work
-as usual. Turn it off any time:
+Arming adds two hooks to your project's `.claude/settings.json`: a
+`SessionStart` hook that snapshots the repo when a session begins, and a `Stop`
+hook that checks claims. Then work as usual. Turn it off any time:
 
 ```bash
-python /path/to/proof/scripts/proof.py disarm   # remove the hook
+python /path/to/proof/scripts/proof.py disarm   # remove both hooks
 python /path/to/proof/scripts/proof.py status   # armed | disarmed
 ```
 
@@ -106,25 +216,49 @@ Run a check manually against any transcript:
 
 ```bash
 python proof/scripts/proof.py verify --transcript <path> --root <repo>
-# exit 0 = PASS, 1 = FAIL, 2 = INCONCLUSIVE
 ```
+
+## Verdicts and exit codes
+
+| Verdict | Exit | Meaning |
+|---------|------|---------|
+| PASS | 0 | Every check ran and passed, and nothing in the diff undermines it. |
+| FAIL | 1 | A check failed. The receipt is the command and its output. |
+| INCONCLUSIVE | 2 | Nothing could be checked definitively (no runner, command not found, timed out). |
+| SUSPECT | 3 | The checks pass, but the tests were gamed, the fix was never red, or the claim contradicts the diff. |
+
+Severity when results combine: FAIL beats SUSPECT beats PASS beats INCONCLUSIVE.
+Missing tooling yields INCONCLUSIVE, never a false PASS. Proof's own errors skip
+an analysis with a note in the report; they never produce FAIL or SUSPECT.
 
 ## How it works
 
-1. The Stop hook (`proof_trigger.py`) reads Claude Code's hook payload and pulls
-   the agent's last message.
-2. A precision classifier checks it for completion-claim language. It is tuned
-   against real-world traps ("I fixed a typo", "the done button is broken",
-   "should work eventually") so it does not cry wolf.
-3. On a fresh claim, the hook blocks the stop and injects a directive telling the
-   agent to spawn an independent verifier subagent.
-4. The verifier extracts the checkable assertions, runs the matching strategy,
-   aggregates a strict verdict, and writes `proof-report.md`.
-5. A per-session fix loop re-blocks after a FAIL (up to `max_fix_cycles`, default
-   3). After a PASS or INCONCLUSIVE the claim is never re-blocked. If the limit
-   is reached without a pass, Proof gives up silently rather than nagging forever.
-   On re-block, the previous `proof-report.md` is prepended as "PREVIOUS RECEIPTS"
-   and the directive notes "attempt N of MAX".
+1. **SessionStart.** `proof_session_start.py` snapshots the working tree
+   (tracked and untracked, minus anything git ignores) into a commit under
+   `refs/proof/baseline/<session>`, using a temporary index. Your index and
+   working tree are never touched. Baselines older than 7 days are pruned.
+2. **Claim detection.** On Stop, `proof_trigger.py` pulls the agent's last
+   message and runs a precision classifier. It is tuned against real-world traps
+   ("I fixed a typo", "the done button is broken", "should work eventually") so
+   it does not cry wolf.
+3. **Inline run.** On a fresh claim, the hook runs the matching checks in-process
+   under `inline_budget` seconds, then the diff analyzers against the baseline:
+   tamper rules for tests and build claims, scope checks for change claims, and
+   red-green for fix claims.
+4. **Decide.**
+   - PASS: the turn ends with a `Proof: PASS (tests)` message.
+   - FAIL: the turn is blocked with the failing command and its output inline.
+   - SUSPECT: blocked once with the findings. If the same findings come back,
+     Proof stops blocking and shows them to you instead.
+   - Anything that did not finish in the budget, or came back INCONCLUSIVE, is
+     marked pending, and the hook asks for an independent verifier subagent to
+     run `proof.py verify --claim-key ...` for just those checks.
+5. **Pending enforcement.** If the agent stops again without running that
+   verification, the hook blocks again with "verification was not run". Only
+   `proof.py` can clear a pending check. Agent prose cannot.
+
+Every block in one continuation chain counts toward `max_fix_cycles` (default 3),
+so Proof can never trap the agent in an infinite loop.
 
 ## Verifier strategies
 
@@ -137,10 +271,18 @@ INCONCLUSIVE, never a false PASS.
 | `build` | "the build is clean" |
 | `typecheck` | "types check" |
 | `lint` | "lint is clean" |
-| `command` | "running X works" |
 | `http` | "GET /health returns 200", body assertions, boots local servers, verifies live deploy URLs |
-| `repro` | "the bug is fixed" (re-runs the original repro) |
-| `filecheck` | "added function X to file Y" |
+
+On top of those, three diff analyzers compare the tree to the session baseline:
+
+| Analyzer | Runs on | Catches |
+|----------|---------|---------|
+| `tamper` | tests and build claims | `test-file-deleted`, `test-removed`, `skip-added`, `only-added`, `assert-gutted`, `runner-neutered` |
+| `scope` | change claims ("fixed", "added", "implemented") | `empty-change`, `docs-only`, `named-path-unchanged`, `named-symbol-missing` |
+| `redgreen` | fix claims | a repro that was never red (`repro-already-green`), or a fix that still fails |
+
+Every rule, with exactly what it matches and what it deliberately ignores, is in
+[`proof/references/verifier-strategies.md`](proof/references/verifier-strategies.md).
 
 ## Runner support
 
@@ -148,7 +290,11 @@ Test and build runner auto-detection covers: Node/Bun/pnpm/yarn/npm
 (by lockfile), Python/pytest, Rust/Cargo, Go, Maven, Gradle (wrapper preferred),
 .NET (sln/csproj), Make (when a `test:` target exists), Elixir/Mix, PHP/Composer.
 
-## HTTP verification (v2)
+Red-green targets changed test files directly for pytest, go test, and JS
+runners (jest, vitest, and npm/pnpm/yarn/bun test scripts). For anything else,
+set `[repro].command`.
+
+## HTTP verification
 
 The `http` strategy handles three scenarios:
 
@@ -165,24 +311,32 @@ The `http` strategy handles three scenarios:
 
 ## Fix loop
 
-When verification fails, Proof does not let the agent walk away. It re-blocks
-the turn with the previous `proof-report.md` receipts and a note reading
-"attempt N of MAX". After `max_fix_cycles` failed attempts (default 3, override
-in `.proof.toml`), Proof stops blocking so you are not stuck in an infinite
-loop. A passing verdict clears the loop immediately.
+When verification fails, Proof does not let the agent walk away. It blocks the
+turn with the failing receipts inline and a note reading "attempt N of MAX". The
+agent fixes the code and claims again inside the same continuation chain, and
+Proof re-verifies the new claim even if it is worded differently.
+
+Every block in the chain counts: FAIL receipts, SUSPECT blocks, subagent
+directives, and "verification was not run" re-blocks. After `max_fix_cycles`
+blocks (default 3, override in `.proof.toml`), Proof lets the turn end so you are
+not stuck in an infinite loop. A passing verdict ends the loop immediately.
 
 ## proof stats
 
-Track the agent's honesty over time. Every `proof verify` run appends an entry
-to `~/.proof/ledger.jsonl` (override with `PROOF_HOME`).
+Track the agent's honesty over time. Every `proof verify` and `proof check` run
+appends an entry to `~/.proof/ledger.jsonl` (override with `PROOF_HOME`).
 
 ```
 $ proof stats
-Honesty rate: 72% (18 verified, 5 lies caught)
-Clean streak: 4
+Honesty rate: 68% (19 verified, 6 lies caught)
+Gamed: 2
+Clean streak: 3
 Worst offender: tests (3 catches)
-Last catch: "All done, tests pass." (2026-06-10)
+Last catch: "All done, tests pass." (2026-09-28)
 ```
+
+`Gamed` counts SUSPECT verdicts. It shows up once the agent has been caught
+gaming at least once.
 
 Filter to recent runs:
 
@@ -196,18 +350,31 @@ Machine-readable output for CI pipelines:
 $ proof stats --json
 ```
 
-## Works with any agent
+## Works with any agent, and in CI
 
 `proof check` verifies any claim text directly, without a transcript. Works from
 CI or with any coding agent:
 
 ```bash
 proof check "all tests pass and the build is clean" --root /repo --json
-# exit 0 = PASS, 1 = FAIL, 2 = INCONCLUSIVE
 ```
 
+`--since <ref>` diffs against a ref instead of the session baseline, so the
+tamper and scope checks cover a whole branch. In a pull request pipeline:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0          # --since needs origin/main in the clone
+- run: python path/to/proof/scripts/proof.py check "all tests pass" --root . --since origin/main
+```
+
+A skipped test or a neutered test script fails the job with exit code 3, even
+though the suite itself is green.
+
 The `--json` flag emits a single JSON object with keys `overall`, `exit`,
-`results`, and `report`. Pipe it into any CI assertion or notification webhook.
+`results`, and `report`. Each result carries `findings` (`rule`, `file`, `line`,
+`snippet`). Pipe it into any CI assertion or notification webhook.
 
 ## .proof.toml reference
 
@@ -221,7 +388,16 @@ Place `.proof.toml` in your project root to override auto-detection.
 | `[commands].lint` | Lint command (no auto-detect; required to get a non-inconclusive verdict) | none |
 | `[http].base_url` | Base URL used for HTTP claims that contain no URL | none |
 | `[http].serve` | Shell command to boot a local server for HTTP verification | auto-detect |
-| `[verify].max_fix_cycles` | Maximum number of re-verification attempts before Proof stops blocking | `3` |
+| `[verify].max_fix_cycles` | Maximum blocks in one continuation chain before Proof lets the turn end | `3` |
+| `[verify].inline_budget` | Seconds the Stop hook spends on checks before deferring the rest to a verifier subagent (env `PROOF_INLINE_BUDGET` overrides) | `90` |
+| `[verify].command_timeout` | Per-command timeout in seconds for `proof verify` and `proof check` | `600` |
+| `[baseline].enabled` | Capture a git baseline on SessionStart | `true` |
+| `[tamper].enabled` | Run the tamper rules | `true` |
+| `[tamper].disable` | Tamper rule ids to turn off, e.g. `["test-removed"]` | `[]` |
+| `[repro].command` | Explicit repro for fix claims; must fail on the baseline and pass now | `""` |
+
+`arm` sets the Stop hook's timeout to `inline_budget + 30` seconds, so re-run it
+after changing the budget.
 
 Example:
 
@@ -237,14 +413,53 @@ serve = "npm run dev"
 
 [verify]
 max_fix_cycles = 5
+inline_budget = 120
+
+[tamper]
+disable = ["assert-gutted"]
+
+[repro]
+command = "pytest tests/test_regressions.py -q"
 ```
+
+The full reference, with precedence rules, is in
+[`proof/references/configuration.md`](proof/references/configuration.md).
+
+## Limits
+
+Proof is honest about where its checks stop.
+
+- **Tamper rules are patterns, tuned for precision.** They catch the common ways
+  to game a suite, and they are deliberately quiet on legitimate changes:
+  conditional skips (`skipif`, `skipUnless`, `importorskip`) and `todo` are
+  allowed, moved or renamed tests are netted out across the change, and a test
+  deleted along with the feature it covered is fine. An agent that mocks out the
+  code under test or rewrites an expected value will not trip them.
+- **Scope checks read backticks.** Named files and symbols are taken from
+  backticked tokens in sentences that say "added", "created", "implemented",
+  "wrote", or "introduced". Prose claims are not parsed.
+- **Red-green needs a runnable repro.** The baseline worktree gets
+  `node_modules` linked in and `PYTHONPATH` set, which covers most projects.
+  Compiled dependencies, monorepos, and exotic setups can come back
+  INCONCLUSIVE; `[repro].command` is the override.
+- **No baseline, fewer checks.** If Proof is armed mid-session it diffs against
+  `HEAD`, marked approximate, and skips the scope and red-green checks. Outside a
+  git repository, all three analyzers are skipped.
+- **The cap is a cap.** After `max_fix_cycles` blocks Proof lets the turn end.
+  The report and ledger still record the verdict.
 
 ## Design
 
 - **Pure Python standard library.** No dependencies. Runs anywhere Python 3.11+ runs.
-- **Adversarial by construction.** The verifier is told to distrust the claims and
-  accept only execution artifacts.
-- **Strict aggregation.** Any single failed claim fails the entire verdict.
+- **Deterministic receipts.** Every verdict comes from commands Proof ran and a
+  diff it computed. Nothing depends on what the agent says it did.
+- **Adversarial by construction.** The verifier subagent, when one is needed, is
+  told to distrust the claims and accept only execution artifacts.
+- **Strict aggregation.** Any single failed check fails the entire verdict, and
+  a SUSPECT finding outranks any number of passes.
+- **Hands off your tree.** Proof writes only temporary index files,
+  `refs/proof/*`, and temporary worktrees under `~/.proof/work`. It never
+  modifies your working tree or index.
 - **Cross-platform.** Tested on Linux and Windows in CI.
 
 Full design and contract docs live in
@@ -258,10 +473,12 @@ cd proof
 python -m pytest -q
 ```
 
-199 tests cover the classifier, claim extractor, every strategy, verdict
-aggregation, the Stop hook's crash-safety and recursion guard, the ledger,
-the fix loop, the installer, and an end-to-end acceptance test that reproduces
-the demo above.
+398 tests cover the classifier, claim extractor, every strategy, verdict
+aggregation, the Stop hook's crash-safety, inline verification and pending
+enforcement, session baselines and changesets, every tamper rule against
+positive and negative corpora, the scope checks, red-green runs in real
+temporary git repos, the ledger, the fix loop, the installer, and an end-to-end
+acceptance test that reproduces the demo above.
 
 ## License
 
