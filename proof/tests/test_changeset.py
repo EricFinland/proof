@@ -1,3 +1,6 @@
+import sys
+
+import pytest
 from proofkit import baseline, changeset
 
 
@@ -61,3 +64,34 @@ def test_form_feed_and_unicode_separator_do_not_split_lines(git_repo, tmp_path):
     git_repo.write("f.txt", "one\na\x0cb\nc d\nlast\n")
     cs = changeset.compute(git_repo.path, b)
     assert cs.get("f.txt").added == [(2, "ab"), (3, "c d"), (4, "last")]
+
+
+def test_path_with_space_keeps_lines(git_repo, tmp_path):
+    git_repo.write("my file.txt", "one\ntwo\n")
+    git_repo.commit()
+    b = _base(git_repo, tmp_path)
+    git_repo.write("my file.txt", "one\nTWO\n")
+    git_repo.write("new doc.md", "n\n")
+    cs = changeset.compute(git_repo.path, b)
+    f = cs.get("my file.txt")
+    assert f.added == [(2, "TWO")] and f.removed == [(2, "two")]
+    assert cs.get("new doc.md").added == [(1, "n")]
+
+
+def test_unquote_c_style_paths():
+    u = changeset._unquote
+    bs, q, tab = chr(92), chr(34), chr(9)
+    assert u(q + 'a/we' + bs + q + 'ird name' + q) == 'a/we' + q + 'ird name'
+    assert u(q + 'b/t' + bs + 't' + 'ab' + bs + bs + 'x' + q) == 'b/t' + tab + 'ab' + bs + 'x'
+    assert u(q + 'a/caf' + bs + '303' + bs + '251' + q) == 'a/caf' + chr(0xe9)
+    assert u('a/plain name.txt' + tab) == 'a/plain name.txt'
+    assert u('/dev/null') == '/dev/null'
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="double quote is not a legal filename character")
+def test_path_with_double_quote_keeps_lines(git_repo, tmp_path):
+    git_repo.write('we"ird.txt', "a\n")
+    git_repo.commit()
+    b = _base(git_repo, tmp_path)
+    git_repo.write('we"ird.txt', "a\nb\n")
+    assert changeset.compute(git_repo.path, b).get('we"ird.txt').added == [(2, "b")]

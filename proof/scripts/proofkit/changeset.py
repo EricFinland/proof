@@ -32,7 +32,37 @@ class ChangeSet:
         return not self.files
 
 
+_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11, "\\": 92, '"': 34}
+
+
+def _unquote(v):
+    """Decode git's C-quoted path form; plain values lose only git's trailing tab."""
+    if not (len(v) >= 2 and v[0] == '"'):
+        return v[:-1] if v.endswith("\t") else v
+    end = v.rfind('"')
+    body, out, i = v[1:end], bytearray(), 0
+    while i < len(body):
+        c = body[i]
+        if c == "\\" and i + 1 < len(body):
+            n = body[i + 1]
+            if n in _ESCAPES:
+                out.append(_ESCAPES[n])
+                i += 2
+                continue
+            if n in "01234567":
+                j = i + 1
+                while j < len(body) and j < i + 4 and body[j] in "01234567":
+                    j += 1
+                out.append(int(body[i + 1:j], 8) & 0xFF)
+                i = j
+                continue
+        out += c.encode("utf-8")
+        i += 1
+    return out.decode("utf-8", errors="replace")
+
+
 def _strip_prefix(p):
+    p = _unquote(p)
     return p[2:] if p[:2] in ("a/", "b/") else p
 
 
