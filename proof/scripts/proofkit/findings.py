@@ -1,5 +1,6 @@
 """Findings: evidence that a passing check was gamed, and the SUSPECT result builder."""
 import hashlib
+import re
 from dataclasses import dataclass
 
 from proofkit.strategies.base import Result
@@ -36,10 +37,16 @@ def suspect_result(claim, method, headline, findings, command="") -> Result:
     return Result(claim, method, command, raw, "suspect", 0.9, list(findings))
 
 
+_CODE_HASH = re.compile(
+    r"#(?:!|(?:include|define|undef|ifdef|ifndef|if|elif|else|endif|pragma|error|region|endregion)\b)")
+
+
 def is_comment_line(text: str) -> bool:
     s = text.strip()
     if not s:
         return True
-    if s.startswith(("//", "/*", "*", "<!--")):
+    if s.startswith(("//", "/*", "<!--")):
         return True
-    return s.startswith("#") and not s.startswith("#[")
+    if s.startswith("*"):
+        return len(s) == 1 or s[1].isspace() or s[1] == "/"
+    return s.startswith("#") and not s.startswith("#[") and not _CODE_HASH.match(s)

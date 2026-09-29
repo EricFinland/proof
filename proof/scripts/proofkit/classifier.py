@@ -67,13 +67,14 @@ def detect_claim(message: str) -> ClaimResult:
 
 
 FIX_PATTERNS = [
-    r"\b(?:bug|issue|it|that|the\s+\w+)\s+is\s+(?:now\s+)?fixed\b",
+    r"\b(?:bug|issue|crash|error|problem|regression|failure|leak|typo|test|build)\s+is\s+(?:now\s+)?fixed\b",
+    r"\b(?:it|that|this)\s+is\s+(?:now\s+)?fixed\b",
     r"\bnow\s+fixed\b",
-    r"\bi'?ve\s+fixed\b",
+    r"\bi['’]?ve\s+fixed\b",
     r"\bi\s+(?:have\s+)?fixed\s+the\b",
 ]
 _CHANGE_EXTRA = [
-    r"\b(?:i'?ve|i\s+have|i)\s+(?:added|implemented|created|wrote|introduced)\b",
+    r"\b(?:i['’]?ve|i\s+have|i)\s+(?:added|implemented|created|wrote|introduced)\b",
     r"\bfeature\s+is\s+complete\b",
     r"\bis\s+(?:now\s+)?implemented\b",
 ]

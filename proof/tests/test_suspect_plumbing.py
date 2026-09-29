@@ -17,6 +17,9 @@ def test_hash_ignores_line_numbers():
 def test_is_comment_line():
     assert is_comment_line("  # it.only(") and is_comment_line("// x") and is_comment_line("")
     assert not is_comment_line("#[ignore]") and not is_comment_line("it.only(")
+    assert not is_comment_line("#include <a.h>") and not is_comment_line("#!/bin/sh")
+    assert not is_comment_line("*args,") and not is_comment_line("**kwargs") and not is_comment_line("*.log")
+    assert is_comment_line("* foo") and is_comment_line("*/")
 
 
 def test_render_omits_empty_parts():

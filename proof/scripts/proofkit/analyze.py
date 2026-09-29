@@ -21,9 +21,7 @@ def run_analyzers(msg, claims, root, cfg, changes, budget, marker_root=None):
     if strategies & {"tests", "build"}:
         from proofkit import tamper
         _safe("tamper", lambda: tamper.to_result(msg, tamper.analyze(changes, root, cfg)))
-    from proofkit.classifier import is_change_claim
-    if is_change_claim(msg):
-        from proofkit import scope
-        _safe("scope", lambda: scope.to_result(msg, scope.analyze(msg, changes)))
+    from proofkit import scope
+    _safe("scope", lambda: scope.to_result(msg, scope.analyze(msg, changes, root)))
     # Task 11 adds redgreen here.
     return results, notes
