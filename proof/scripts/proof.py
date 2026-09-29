@@ -90,6 +90,8 @@ def main(argv=None):
     ck.add_argument("--root", default=".")
     ck.add_argument("--json", action="store_true", default=False,
                     help="Emit machine-readable JSON instead of ASCII verdict")
+    ck.add_argument("--since", default=None,
+                    help="Ref or commit marking the start of the change to verify")
     args = ap.parse_args(argv)
 
     if args.cmd == "arm":
@@ -111,7 +113,8 @@ def main(argv=None):
     if args.cmd == "check":
         from proofkit.verdict import run_check
         return run_check(claim_text=args.claim, root=args.root,
-                         as_json=getattr(args, "json", False))
+                         as_json=getattr(args, "json", False),
+                         since=getattr(args, "since", None))
     return 1
 
 if __name__ == "__main__":

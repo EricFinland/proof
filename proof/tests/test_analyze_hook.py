@@ -1,0 +1,65 @@
+import json, os, subprocess, sys
+from pathlib import Path
+from proofkit import baseline, hookflow, marker
+
+PROOF = str(Path(__file__).resolve().parents[1] / "scripts" / "proof.py")
+CLAIM = "All done, tests pass."
+
+
+def _py_repo(repo):
+    repo.write("pyproject.toml", "[tool.pytest.ini_options]\npythonpath = [\".\"]\n")
+    repo.write("tests/test_a.py", "def test_a():\n    assert 1 == 1\n\ndef test_b():\n    assert 2 == 2\n")
+    repo.commit()
+
+
+def _tp(tmp_path, text):
+    f = tmp_path / "t.jsonl"
+    f.write_text(json.dumps({"type": "assistant", "message": {"role": "assistant",
+        "content": [{"type": "text", "text": text}]}}), encoding="utf-8")
+    return str(f)
+
+
+def _stop(tmp_path, cwd, active=False, text=CLAIM):
+    return hookflow.decide_stop({"session_id": "s", "transcript_path": _tp(tmp_path, text),
+        "stop_hook_active": active}, cwd, marker_root=tmp_path / "home")
+
+
+def test_suspect_blocks_once_then_tells_user(git_repo, tmp_path):
+    _py_repo(git_repo)
+    baseline.capture(git_repo.path, "s", marker_root=tmp_path / "home")
+    git_repo.write("tests/test_a.py", "import pytest\n\ndef test_a():\n    assert 1 == 1\n\n"
+                   "@pytest.mark.skip\ndef test_b():\n    assert 2 == 2\n")
+    first = _stop(tmp_path, git_repo.path)
+    assert first["decision"] == "block" and "skip-added" in first["reason"]
+    second = _stop(tmp_path, git_repo.path, active=True)
+    assert "decision" not in second and "skip-added" in second["systemMessage"]
+    assert marker.last_outcome("s", CLAIM, root=tmp_path / "home") == "suspect"
+
+
+def test_clean_change_passes(git_repo, tmp_path):
+    _py_repo(git_repo)
+    baseline.capture(git_repo.path, "s", marker_root=tmp_path / "home")
+    git_repo.write("tests/test_c.py", "def test_c():\n    assert 3 == 3\n")
+    assert _stop(tmp_path, git_repo.path)["systemMessage"].startswith("Proof: PASS")
+
+
+def test_analyzer_error_never_fails(git_repo, tmp_path, monkeypatch):
+    _py_repo(git_repo)
+    baseline.capture(git_repo.path, "s", marker_root=tmp_path / "home")
+    git_repo.write("tests/test_a.py", "import pytest\n@pytest.mark.skip\ndef test_a():\n    assert 1\n")
+    from proofkit import tamper
+    monkeypatch.setattr(tamper, "analyze", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    out = _stop(tmp_path, git_repo.path)
+    assert out["systemMessage"].startswith("Proof: PASS")
+
+
+def test_check_since_reports_suspect(git_repo, tmp_path):
+    _py_repo(git_repo)
+    base = git_repo.git("rev-parse", "HEAD").strip()
+    git_repo.write("tests/test_a.py", "def test_a():\n    assert 1 == 1\n")
+    env = dict(os.environ, PROOF_HOME=str(tmp_path / "home"))
+    p = subprocess.run([sys.executable, PROOF, "check", "all tests pass", "--root", str(git_repo.path),
+                        "--since", base, "--json"], capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    payload = json.loads(p.stdout)
+    assert p.returncode == 3 and payload["overall"] == "suspect"
+    assert any(f["rule"] == "test-removed" for r in payload["results"] for f in r["findings"])

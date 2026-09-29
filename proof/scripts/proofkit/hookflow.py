@@ -132,8 +132,12 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
     claims = extract_claims(msg, root=root)
     _config_fill(claims, root, cfg)
     results = run_claims(claims, root, budget=budget)
-    notes = []
-    # Tasks 8 and 11 extend `results` and `notes` with analyzer output here.
+    from proofkit.analyze import run_analyzers
+    from proofkit.changeset import for_claim
+    changes = for_claim(root, session=session, marker_root=marker_root)
+    extra, notes = run_analyzers(msg, claims, root, cfg, changes, budget,
+                                 marker_root=marker_root)
+    results += extra
 
     if not results:
         marker.set_pending(session, msg, ["unstructured claim"], root=marker_root)
@@ -153,14 +157,32 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
         return _block(FAIL_HEAD.format(n=n, max=max_cycles) + _fail_receipts(outcome)
                       + FAIL_TAIL)
 
-    # Task 8 inserts the SUSPECT policy here.
+    system_message = None
+    if outcome.overall == "suspect":
+        from proofkit.findings import findings_hash
+        found = [f for r in outcome.results if r.verdict == "suspect" for f in r.findings]
+        text = "\n".join(f.render() for f in found)
+        h = findings_hash(found)
+        marker.record_outcome(session, msg, "suspect", root=marker_root)
+        if not marker.suspect_seen(session, h, root=marker_root):
+            marker.mark_suspect_seen(session, h, root=marker_root)
+            return _block(
+                "PROOF: the checks pass, but the change looks like it games them:\n\n"
+                + text + "\n\nRevert these changes, or explain why each one is "
+                "intentional. If they are intentional, Proof will show them to the user "
+                "instead of blocking again.")
+        system_message = ("Proof: SUSPECT. The agent was asked about these once and they "
+                          "remain. Please review:\n" + text)
 
     if outcome.unresolved:
         pending = sorted({r.method for r in outcome.unresolved})
         marker.set_pending(session, msg, pending, root=marker_root)
-        return _block(_directive(pending, tp, cwd, session, key))
+        return _block(_directive(pending, tp, cwd, session, key), system_message)
 
-    marker.record_outcome(session, msg, outcome.overall, root=marker_root)
+    if outcome.overall != "suspect":
+        marker.record_outcome(session, msg, outcome.overall, root=marker_root)
+    if system_message:
+        return {"systemMessage": system_message}
     methods = ", ".join(sorted({r.method for r in outcome.results}))
     return {"systemMessage": f"Proof: {outcome.overall.upper()} ({methods})"}
 

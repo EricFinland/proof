@@ -185,13 +185,15 @@ def print_outcome(outcome, as_json=False):
                 print(f"  SUSPECT {r.method}: {line}")
 
 
-def _execute_claims(claims, root, out_dir, project=None, as_json=False, transcript=""):
+def _execute_claims(claims, root, out_dir, project=None, as_json=False, transcript="",
+                    extra=None, notes=None):
     """Run all claims, write report, append ledger, print verdict.
 
     Returns an exit code int: 0=pass, 1=fail, 2=inconclusive, 3=suspect.
     When as_json=True, prints one JSON object instead of ASCII verdict lines.
     """
-    outcome = finalize(run_claims(claims, root), root, out_dir, project, transcript)
+    outcome = finalize(run_claims(claims, root) + list(extra or []), root, out_dir,
+                       project, transcript, notes=notes)
     print_outcome(outcome, as_json)
     return outcome.exit_code
 
@@ -218,10 +220,11 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
     claims = extract_claims(msg, root=root)
     cfg = load_config(root)
     _config_fill(claims, root, cfg)
+    extra, notes = _analyze(msg, claims, root, cfg, session_id, since)
     exit_code = _execute_claims(claims, root, out_dir,
                                 project=Path(root).resolve().name,
                                 as_json=as_json,
-                                transcript=transcript)
+                                transcript=transcript, extra=extra, notes=notes)
 
     # Record outcome into marker when called with a session_id (e.g. from trigger directive).
     if session_id and (msg or claim_key):
@@ -239,10 +242,22 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
     return exit_code
 
 
-def run_check(claim_text, root=".", out_dir=".", as_json=False):
+def _analyze(msg, claims, root, cfg, session_id, since):
+    """Run the diff-based analyzers. Never raises."""
+    try:
+        from proofkit.analyze import run_analyzers
+        from proofkit.changeset import for_claim
+        from proofkit.strategies.base import Budget
+        changes = for_claim(root, session=session_id, since=since)
+        return run_analyzers(msg, claims, root, cfg, changes, Budget(None))
+    except Exception as e:
+        return [], [f"analysis skipped: {e}"]
+
+
+def run_check(claim_text, root=".", out_dir=".", as_json=False, since=None):
     """Verify any claim text directly, without a transcript.
 
-    Returns an exit code int: 0=pass, 1=fail, 2=inconclusive.
+    Returns an exit code int: 0=pass, 1=fail, 2=inconclusive, 3=suspect.
     """
     from proofkit import strategies
     from proofkit.extractor import extract_claims
@@ -250,15 +265,16 @@ def run_check(claim_text, root=".", out_dir=".", as_json=False):
 
     strategies.load_all()
     claims = extract_claims(claim_text, root=root)
-    if not claims:
+    cfg = load_config(root)
+    _config_fill(claims, root, cfg)
+    extra, notes = _analyze(claim_text, claims, root, cfg, None, since)
+    if not claims and not extra:
         if as_json:
             payload = {"overall": "inconclusive", "exit": 2, "results": [], "report": ""}
             print(_json.dumps(payload))
         else:
             print("INCONCLUSIVE (no checkable claims found)")
         return 2
-    cfg = load_config(root)
-    _config_fill(claims, root, cfg)
     return _execute_claims(claims, root, out_dir,
                            project=Path(root).resolve().name,
-                           as_json=as_json)
+                           as_json=as_json, extra=extra, notes=notes)
