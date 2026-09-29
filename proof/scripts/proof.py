@@ -74,6 +74,10 @@ def main(argv=None):
                    help="Directory to write proof-report.md (default: current dir)")
     v.add_argument("--json", action="store_true", default=False,
                    help="Emit machine-readable JSON instead of ASCII verdict")
+    v.add_argument("--claim-key", default=None, dest="claim_key",
+                   help="Verify the stored claim for this key instead of the last message")
+    v.add_argument("--since", default=None,
+                   help="Ref or commit marking the start of the change to verify")
     st = sub.add_parser("stats")
     st.add_argument("--days", type=int, default=None)
     st.add_argument("--json", action="store_true", default=False)
@@ -96,7 +100,9 @@ def main(argv=None):
         return run_verify(transcript=args.transcript, root=args.root,
                           out_dir=getattr(args, "out_dir", "."),
                           session_id=getattr(args, "session", None),
-                          as_json=getattr(args, "json", False))
+                          as_json=getattr(args, "json", False),
+                          claim_key=getattr(args, "claim_key", None),
+                          since=getattr(args, "since", None))
     if args.cmd == "stats":
         return _cmd_stats(args)
     if args.cmd == "check":

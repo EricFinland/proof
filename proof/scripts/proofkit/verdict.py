@@ -195,14 +195,25 @@ def _execute_claims(claims, root, out_dir, project=None, as_json=False, transcri
     return outcome.exit_code
 
 
-def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=False):
+def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=False,
+               claim_key=None, since=None):
+    import os
     from proofkit import strategies
     from proofkit.transcript import last_assistant_text
     from proofkit.extractor import extract_claims
     from proofkit.config import load_config
 
     strategies.load_all()
-    msg = last_assistant_text(transcript) if transcript else ""
+    marker_root = os.environ.get("PROOF_HOME") or None
+    msg = ""
+    if claim_key and session_id:
+        try:
+            from proofkit.marker import get_claim
+            msg = get_claim(session_id, claim_key, root=marker_root) or ""
+        except Exception:
+            msg = ""
+    if not msg and transcript:
+        msg = last_assistant_text(transcript)
     claims = extract_claims(msg, root=root)
     cfg = load_config(root)
     _config_fill(claims, root, cfg)
@@ -212,15 +223,15 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
                                 transcript=transcript)
 
     # Record outcome into marker when called with a session_id (e.g. from trigger directive).
-    if session_id and msg:
+    if session_id and (msg or claim_key):
         try:
-            from proofkit.marker import record_outcome
+            from proofkit.marker import record_outcome, record_outcome_by_key
             verdict_map = {v: k for k, v in EXIT.items()}
             verdict = verdict_map.get(exit_code, "inconclusive")
-            # Use PROOF_HOME env var for marker root (matches trigger behavior)
-            import os
-            marker_root = os.environ.get("PROOF_HOME") or None
-            record_outcome(session_id, msg, verdict, root=marker_root)
+            if claim_key:
+                record_outcome_by_key(session_id, claim_key, verdict, root=marker_root)
+            else:
+                record_outcome(session_id, msg, verdict, root=marker_root)
         except Exception:
             pass  # never let marker failures affect the verdict
 
