@@ -21,6 +21,7 @@ class ChangeSet:
     base_commit: str
     approximate: bool
     files: list
+    root: str = ""  # git toplevel that `files` paths are relative to
 
     def paths(self):
         return [f.path for f in self.files]
@@ -98,25 +99,32 @@ def _parse(diff, files):
             old_no += 1
 
 
-def compute(root, base):
+def compute(root, base, scope=""):
+    """Diff `base` against the working tree. `scope` limits it to a subdirectory
+    (toplevel-relative, forward slashes); resulting paths stay toplevel-relative."""
+    spec = ["--", f":(literal){scope.rstrip('/')}"] if scope.strip("/") else []
     cur_tree = gitutil.snapshot_tree(root)
     base_tree = gitutil.rev_parse(root, f"{base.commit}^{{tree}}")
     files = {}
     parts = gitutil.git(root, "diff", "--name-status", "-z", "--no-renames",
-                        base_tree, cur_tree).split("\0")
+                        base_tree, cur_tree, *spec).split("\0")
     for i in range(0, len(parts) - 1, 2):
         status, path = parts[i], parts[i + 1]
         if status and path and not _ARTIFACT.search(path):
             files[path] = FileChange(path, status[0])
     _parse(gitutil.git(root, "diff", "-U0", "--no-color", "--no-renames", "--no-ext-diff",
-                       base_tree, cur_tree), files)
-    return ChangeSet(base.commit, base.approximate, sorted(files.values(), key=lambda f: f.path))
+                       base_tree, cur_tree, *spec), files)
+    return ChangeSet(base.commit, base.approximate,
+                     sorted(files.values(), key=lambda f: f.path), str(root))
 
 
 def for_claim(root, session=None, since=None, marker_root=None):
     try:
         from proofkit.baseline import resolve
         b = resolve(root, session=session, since=since, marker_root=marker_root)
-        return compute(b.root, b) if b else None
+        if not b:
+            return None
+        prefix = gitutil.git(root, "rev-parse", "--show-prefix").strip()
+        return compute(b.root, b, scope=prefix)
     except Exception:
         return None

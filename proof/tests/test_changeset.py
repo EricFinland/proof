@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 import pytest
 from proofkit import baseline, changeset
@@ -95,3 +96,18 @@ def test_path_with_double_quote_keeps_lines(git_repo, tmp_path):
     b = _base(git_repo, tmp_path)
     git_repo.write('we"ird.txt', "a\nb\n")
     assert changeset.compute(git_repo.path, b).get('we"ird.txt').added == [(2, "b")]
+
+
+def test_subdir_root_scopes_changes(git_repo, tmp_path):
+    git_repo.write("sub/a.py", "a\n")
+    git_repo.write("other/b.py", "b\n")
+    git_repo.commit()
+    _base(git_repo, tmp_path)
+    git_repo.write("sub/a.py", "a\nA\n")
+    git_repo.write("other/b.py", "b\nB\n")
+    git_repo.write("root.txt", "r\n")
+    cs = changeset.for_claim(git_repo.path / "sub", session="s", marker_root=tmp_path / "home")
+    assert cs.paths() == ["sub/a.py"]
+    assert Path(cs.root).resolve() == git_repo.path.resolve()
+    whole = changeset.for_claim(git_repo.path, session="s", marker_root=tmp_path / "home")
+    assert whole.paths() == ["other/b.py", "root.txt", "sub/a.py"]

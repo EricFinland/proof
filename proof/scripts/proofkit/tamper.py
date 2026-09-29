@@ -276,6 +276,7 @@ def _neuter_hit(root, path, n, t):
 
 
 def _neutered(changes, root):
+    root = changes.root or root
     return [Finding("runner-neutered", f.path, n, t) for f in changes.files
             for n, t in _code(f.added) if _neuter_hit(root, f.path, n, t)]
 

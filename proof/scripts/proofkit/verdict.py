@@ -220,7 +220,8 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
     claims = extract_claims(msg, root=root)
     cfg = load_config(root)
     _config_fill(claims, root, cfg)
-    extra, notes = _analyze(msg, claims, root, cfg, session_id, since)
+    extra, notes = _analyze(msg, claims, root, cfg, session_id, since,
+                            marker_root=marker_root)
     exit_code = _execute_claims(claims, root, out_dir,
                                 project=Path(root).resolve().name,
                                 as_json=as_json,
@@ -242,13 +243,13 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
     return exit_code
 
 
-def _analyze(msg, claims, root, cfg, session_id, since):
+def _analyze(msg, claims, root, cfg, session_id, since, marker_root=None):
     """Run the diff-based analyzers. Never raises."""
     try:
         from proofkit.analyze import run_analyzers
         from proofkit.changeset import for_claim
         from proofkit.strategies.base import Budget
-        changes = for_claim(root, session=session_id, since=since)
+        changes = for_claim(root, session=session_id, since=since, marker_root=marker_root)
         return run_analyzers(msg, claims, root, cfg, changes, Budget(None))
     except Exception as e:
         return [], [f"analysis skipped: {e}"]

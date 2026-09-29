@@ -135,8 +135,11 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
     from proofkit.analyze import run_analyzers
     from proofkit.changeset import for_claim
     changes = for_claim(root, session=session, marker_root=marker_root)
-    extra, notes = run_analyzers(msg, claims, root, cfg, changes, budget,
-                                 marker_root=marker_root)
+    try:
+        extra, notes = run_analyzers(msg, claims, root, cfg, changes, budget,
+                                     marker_root=marker_root)
+    except Exception as e:  # analysis must never stop verification
+        extra, notes = [], [f"analysis skipped: {e}"]
     results += extra
 
     if not results:
@@ -166,11 +169,14 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
         marker.record_outcome(session, msg, "suspect", root=marker_root)
         if not marker.suspect_seen(session, h, root=marker_root):
             marker.mark_suspect_seen(session, h, root=marker_root)
-            return _block(
-                "PROOF: the checks pass, but the change looks like it games them:\n\n"
-                + text + "\n\nRevert these changes, or explain why each one is "
-                "intentional. If they are intentional, Proof will show them to the user "
-                "instead of blocking again.")
+            # On the last chain slot no later stop can show the user these findings,
+            # so they go out as a message instead of a block.
+            if n < max_cycles:
+                return _block(
+                    "PROOF: the checks pass, but the change looks like it games them:\n\n"
+                    + text + "\n\nRevert these changes, or explain why each one is "
+                    "intentional. If they are intentional, Proof will show them to the "
+                    "user instead of blocking again.")
         system_message = ("Proof: SUSPECT. The agent was asked about these once and they "
                           "remain. Please review:\n" + text)
 

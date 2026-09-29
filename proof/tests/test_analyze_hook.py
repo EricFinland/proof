@@ -63,3 +63,43 @@ def test_check_since_reports_suspect(git_repo, tmp_path):
     payload = json.loads(p.stdout)
     assert p.returncode == 3 and payload["overall"] == "suspect"
     assert any(f["rule"] == "test-removed" for r in payload["results"] for f in r["findings"])
+
+
+def test_subdir_makefile_neutered_is_caught(git_repo, tmp_path):
+    from proofkit import changeset, tamper
+    git_repo.write("app/Makefile", "test:\n\tpytest\n")
+    git_repo.write("other/x.txt", "x\n")
+    git_repo.commit()
+    baseline.capture(git_repo.path, "s", marker_root=tmp_path / "home")
+    git_repo.write("app/Makefile", "test:\n\tpytest || true\n")
+    git_repo.write("other/x.txt", "changed\n")
+    sub = git_repo.path / "app"
+    cs = changeset.for_claim(sub, session="s", marker_root=tmp_path / "home")
+    assert cs.paths() == ["app/Makefile"]
+    found = tamper.analyze(cs, str(sub), {})
+    assert [f.rule for f in found] == ["runner-neutered"]
+
+
+def test_last_slot_suspect_is_shown_not_blocked(git_repo, tmp_path):
+    from proofkit.config import load_config
+    from proofkit.strategies.base import Budget
+    _py_repo(git_repo)
+    home = tmp_path / "home"
+    baseline.capture(git_repo.path, "s", marker_root=home)
+    git_repo.write("tests/test_a.py", "import pytest\n\n@pytest.mark.skip\ndef test_a():\n    assert 1 == 1\n")
+    for _ in range(3):
+        marker.chain_bump("s", root=home)
+    out = hookflow.verify_inline(CLAIM, "s", _tp(tmp_path, CLAIM), git_repo.path,
+                                 load_config(str(git_repo.path)), Budget(60), home, 3)
+    assert "decision" not in out and "skip-added" in out["systemMessage"]
+    assert marker.last_outcome("s", CLAIM, root=home) == "suspect"
+
+
+def test_analyzer_orchestration_error_does_not_escape(git_repo, tmp_path, monkeypatch):
+    _py_repo(git_repo)
+    baseline.capture(git_repo.path, "s", marker_root=tmp_path / "home")
+    from proofkit import analyze
+    monkeypatch.setattr(analyze, "run_analyzers",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    out = _stop(tmp_path, git_repo.path)
+    assert out["systemMessage"].startswith("Proof: PASS")
