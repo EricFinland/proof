@@ -270,10 +270,47 @@ def test_js_red_classification():
             assert _judge(cmd, 1, out) == "inconclusive", (cmd, out)
 
 
-def test_generic_sources_keep_the_simple_rule():
+def test_runner_rules_apply_by_argv_whatever_the_source():
     for source in ("config", "claim"):
-        assert _judge(["python", "-m", "pytest"], 2, "boom", source) == "pass"
+        assert _judge(["python", "-m", "pytest", "-q"], 2, "Interrupted: 1 error", source) == "inconclusive"
+        assert _judge(["python", "-m", "pytest", "-q"], 1, "FAILED t::a", source) == "pass"
+        assert _judge(["npx", "jest"], 1, "Cannot find module './calc'", source) == "inconclusive"
+        assert _judge(["npx", "vitest", "run"], 1, "SyntaxError: bad", source) == "inconclusive"
+        assert _judge(["npm", "test"], 1, "Test suite failed to run", source) == "inconclusive"
+        assert _judge(["./node_modules/.bin/jest.cmd"], 1, "expect(1).toBe(2)", source) == "pass"
+        assert _judge(["go", "test", "./..."], 1, "exit status 1", source) == "inconclusive"
+        assert _judge(["go", "test", "./..."], 1, "--- FAIL: TestA", source) == "pass"
+
+
+def test_unknown_commands_keep_the_simple_rule():
+    for source in ("config", "claim"):
+        assert _judge(["./repro.sh"], 2, "boom", source) == "pass"
+        assert _judge(["python", "-c", "assert 0"], 1, "AssertionError", source) == "pass"
         assert _judge(["./repro.sh"], 1, "No module named x", source) == "inconclusive"
+        assert _judge(["npm", "run", "build"], 1, "SyntaxError", source) == "pass"
+
+
+def test_config_pytest_repro_collection_error_is_inconclusive(git_repo, tmp_path):
+    # A test file the targeted source cannot name (check_*.py), so the configured
+    # repro command is used; the baseline dies at collection (pytest exit 2).
+    git_repo.write(".gitignore", "node_modules/\n")
+    git_repo.write("pyproject.toml", "[tool.pytest.ini_options]\npythonpath = [\".\"]\n"
+                   "python_files = [\"check_*.py\"]\n")
+    git_repo.write("calc.py", FIXED)
+    git_repo.commit()
+    b = baseline.capture(git_repo.path, "s", marker_root=tmp_path / "home")
+    git_repo.write("calc.py", FIXED + "\n\ndef marker():\n    return 1\n")
+    git_repo.write("tests/check_calc.py",
+                   "from calc import add, marker\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+    cs = changeset.compute(git_repo.path, b)
+    spec = redgreen.find_repro("I fixed the bug.", cs, git_repo.path,
+                               {"repro": {"command": "python -m pytest -q"}})
+    assert spec.source == "config" and spec.copy_files == ["tests/check_calc.py"]
+    r = redgreen.run("I fixed the bug.", spec, git_repo.path, b.commit, Budget(None),
+                     marker_root=tmp_path / "home")
+    assert r.verdict == "inconclusive", r.raw_output
+    assert "pytest exit 2" in r.raw_output
+    assert _work_empty(tmp_path)
 
 
 # Ruling R9b: the repro runs in the requested project root.

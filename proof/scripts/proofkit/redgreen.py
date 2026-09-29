@@ -187,15 +187,28 @@ def _env_failure(res):
     return res["code"] == 127 or bool(_ENV_FAILURE.search(res["output"][-4000:]))
 
 
+def _prog(arg):
+    """Lowercased program name of an argv element: `./node_modules/.bin/jest.cmd` -> `jest`."""
+    name = re.split(r"[/\\]", str(arg))[-1].lower()
+    return re.sub(r"\.(cmd|exe|bat|ps1|js|mjs|cjs)$", "", name)
+
+
 def _runner_kind(spec):
-    """Which red rules apply. Config and claim repros are arbitrary commands."""
-    if spec.source != "tests":
-        return "generic"
-    if any("pytest" in str(a) for a in spec.command):
+    """Which red rules apply, decided by the command's argv whatever its source.
+    Commands that match no known runner get the simple rule."""
+    cmd = [str(a) for a in spec.command]
+    if any("pytest" in a for a in cmd):
         return "pytest"
-    if list(spec.command[:2]) == ["go", "test"]:
+    if cmd[:2] == ["go", "test"]:
         return "go"
-    return "js"
+    progs = [_prog(a) for a in cmd]
+    if "jest" in progs or "vitest" in progs:
+        return "js"
+    if progs and progs[0] in ("npm", "yarn", "pnpm", "bun") and "test" in cmd:
+        return "js"
+    if spec.source == "tests":
+        return "js"  # _targeted only builds JS runner commands beyond pytest and go
+    return "generic"
 
 
 def _unclean(spec, red):
