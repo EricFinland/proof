@@ -86,3 +86,20 @@ def test_session_start_script_captures(git_repo, tmp_path):
         {"session_id": "ss1", "cwd": str(git_repo.path)}), capture_output=True, text=True, env=env)
     assert p.stdout == ""
     assert (tmp_path / "home" / "baselines" / "ss1.json").exists()
+
+
+def test_snapshot_tree_sees_same_size_edit_in_racy_window(git_repo):
+    # An entry whose mtime equals the index file's mtime is "racily clean": git
+    # must re-hash it. That only works if the index copy keeps the real index mtime.
+    git_repo.git("config", "core.checkStat", "minimal")
+    git_repo.git("config", "core.trustctime", "false")
+    f = git_repo.write("a.txt", "one\ntwo\n")
+    stamp = time.time_ns() - 60 * 10**9
+    os.utime(f, ns=(stamp, stamp))
+    git_repo.commit("init")
+    os.utime(git_repo.path / ".git" / "index", ns=(stamp, stamp))
+    first = gitutil.snapshot_tree(git_repo.path)
+    f.write_text("one\nTWO\n", encoding="utf-8")
+    os.utime(f, ns=(stamp, stamp))
+    assert (git_repo.path / ".git" / "index").stat().st_mtime_ns == stamp
+    assert gitutil.snapshot_tree(git_repo.path) != first

@@ -58,7 +58,8 @@ def snapshot_tree(root):
     os.close(fd)
     try:
         if real.exists():
-            shutil.copyfile(real, tmp)
+            # copy2 keeps the mtime: git compares entry mtimes to the index mtime (racy check)
+            shutil.copy2(real, tmp)
         else:
             os.remove(tmp)
         env = {"GIT_INDEX_FILE": tmp}
