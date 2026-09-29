@@ -11,6 +11,8 @@ def _read(rel):
 def test_version():
     assert proofkit.__version__ == "3.0.0"
     assert '"version": "3.0.0"' in _read(".claude-plugin/plugin.json")
+    skill_readme = _read("proof/README.md")
+    assert "v3.0.0" in skill_readme and "2.0.0" not in skill_readme
 
 
 def test_config_reference_lists_v3_keys():
@@ -26,7 +28,7 @@ def test_docs_mention_suspect_and_exit_3():
 
 
 def test_no_em_dashes_in_docs():
-    for rel in ("README.md", "proof/SKILL.md", *[str(p.relative_to(ROOT)) for p in (ROOT / "proof/references").glob("*.md")]):
+    for rel in ("README.md", "proof/README.md", "proof/SKILL.md", *[str(p.relative_to(ROOT)) for p in (ROOT / "proof/references").glob("*.md")]):
         assert "\u2014" not in _read(rel), rel
 
 
