@@ -80,6 +80,7 @@ def decide_stop(payload, cwd, marker_root=None):
     cfg = load_config(str(cwd))
     max_cycles = int(cfg_get(cfg, "verify", "max_fix_cycles", default=3))
 
+    in_fix_chain = False
     if not active:
         marker.chain_reset(session, root=marker_root)
     else:
@@ -97,6 +98,7 @@ def decide_stop(payload, cwd, marker_root=None):
                                                session, key))
         if state["last"] not in ("fail", "suspect"):
             return None
+        in_fix_chain = True
 
     msg = last_assistant_text(tp)
     if not detect_claim(msg).is_claim:
@@ -104,8 +106,10 @@ def decide_stop(payload, cwd, marker_root=None):
     if not marker.should_block(session, msg, max_cycles=max_cycles, root=marker_root):
         return None
 
+    # Only a fresh, first verification may be skipped by the gate. A re-claim inside a
+    # fail/suspect chain is always re-verified, even when its wording is new.
     try:
-        if marker.last_outcome(session, msg, root=marker_root) is None:
+        if not in_fix_chain and marker.last_outcome(session, msg, root=marker_root) is None:
             from proofkit.gate import decide
             g = decide(msg, transcript=tp, root=str(cwd), session=session,
                        marker_root=marker_root)
@@ -140,7 +144,9 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
         r.verdict in ("deferred", "inconclusive") for r in results)
     outcome = finalize(results, root, out_dir=root, transcript=tp,
                        write_ledger=not unresolved_only, notes=notes)
-    n = marker.attempts(session, msg, root=marker_root)
+    # The chain's block count (after this attempt's bump) is what caps the fix loop,
+    # so it labels the attempt even when the claim was reworded.
+    n = marker.chain_state(session, root=marker_root)["count"]
 
     if outcome.overall == "fail":
         marker.record_outcome(session, msg, "fail", root=marker_root)

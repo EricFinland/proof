@@ -100,3 +100,29 @@ def test_trigger_prints_only_json(tmp_path):
         {"session_id": "s9", "transcript_path": _tp(tmp_path, CLAIM), "stop_hook_active": False}),
         capture_output=True, text=True, env=env, cwd=str(w))
     assert json.loads(p.stdout)["decision"] == "block"
+
+
+REWORDED = "Fixed it, all tests pass now."
+
+
+def test_reworded_reclaim_in_fail_chain_counts_chain_attempts(tmp_path):
+    w = _work(tmp_path, "tests_fail")
+    assert "attempt 1 of 3" in _stop(tmp_path, w)["reason"]
+    out = _stop(tmp_path, w, text=REWORDED, active=True)
+    assert out["decision"] == "block"
+    assert "attempt 2 of 3" in out["reason"]
+
+
+def test_gate_never_skips_reworded_reclaim_in_fail_chain(tmp_path, monkeypatch):
+    from proofkit import gate
+    w = _work(tmp_path, "tests_fail")
+    assert _stop(tmp_path, w)["decision"] == "block"
+    calls = []
+    monkeypatch.setattr(gate, "decide", lambda *a, **k: calls.append(1) or {"decision": "skip"})
+    out = _stop(tmp_path, w, text=REWORDED, active=True)
+    assert out["decision"] == "block"
+    assert "FAIL tests" in out["reason"]
+    assert calls == []
+    # the same gate stub does skip a fresh, first verification
+    assert _stop(tmp_path, w, sid="fresh") is None
+    assert calls == [1]

@@ -65,17 +65,19 @@ def test_silent_after_pass(tmp_path):
 
 # 3) prior fail -> same claim -> blocks again with the fresh FAIL receipt and attempt count
 def test_reblock_after_fail_with_receipts(tmp_path):
-    from proofkit.marker import record_attempt, record_outcome
+    from proofkit.marker import chain_bump, record_attempt, record_outcome
     msg = "All done, tests pass."
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     cwd = tmp_path / "work"
     shutil.copytree(FIX / "tests_fail", cwd)
     tp = _transcript(tmp_path, msg)
-    # simulate 1 prior attempt + fail outcome
+    # simulate 1 prior blocked attempt + fail outcome in the current block chain;
+    # the re-claim arrives inside that chain (stop_hook_active set by the harness)
     record_attempt("s1", msg, root=home)
+    chain_bump("s1", root=home)
     record_outcome("s1", msg, "fail", root=home)
-    r = _run({"session_id": "s1", "transcript_path": tp, "stop_hook_active": False},
+    r = _run({"session_id": "s1", "transcript_path": tp, "stop_hook_active": True},
              home, cwd=cwd)
     out = json.loads(r.stdout)
     assert out["decision"] == "block"
