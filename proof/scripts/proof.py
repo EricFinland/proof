@@ -6,6 +6,7 @@ from proofkit import install
 import proofkit
 
 TRIGGER = str(Path(__file__).resolve().parent / "proof_trigger.py")
+SESSION_START = str(Path(__file__).resolve().parent / "proof_session_start.py")
 
 def _settings(args):
     return Path(args.settings) if args.settings else Path(".claude/settings.json")
@@ -90,7 +91,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if args.cmd == "arm":
-        install.arm(_settings(args), TRIGGER); print("Proof armed."); return 0
+        install.arm(_settings(args), TRIGGER, session_start_path=SESSION_START); print("Proof armed."); return 0
     if args.cmd == "disarm":
         install.disarm(_settings(args)); print("Proof disarmed."); return 0
     if args.cmd == "status":
