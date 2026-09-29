@@ -30,6 +30,9 @@ _TEST_FILE = re.compile(r"(^|/)test_[^/]*\.py$|_test\.py$|\.(test|spec)\.[cm]?[j
 _ENV_FAILURE = re.compile(
     r"command not found|No module named|Cannot find module|is not recognized as an internal"
     r"|ENOENT|no tests ran|collected 0 items|error: no such command", re.I)
+_JS_UNCLEAN = re.compile(r"Test suite failed to run|Failed to load|Failed to resolve import"
+                         r"|Cannot find module|SyntaxError")
+_GO_UNCLEAN = re.compile(r"\[build failed\]|\[setup failed\]|undefined:")
 _NO_REPRO = "no repro found; add a test or a Repro: line"
 
 
@@ -37,7 +40,8 @@ _NO_REPRO = "no repro found; add a test or a Repro: line"
 class ReproSpec:
     command: list
     source: str
-    copy_files: list = field(default_factory=list)
+    copy_files: list = field(default_factory=list)  # toplevel-relative
+    cwd: str = ""  # project root relative to the git toplevel, forward slashes, "" at top level
 
 
 def _targeted(root, cfg, targets):
@@ -62,21 +66,41 @@ def _targeted(root, cfg, targets):
     return None
 
 
+def _project_cwd(root, top):
+    """`root` relative to the git toplevel `top`, forward slashes, "" at top level."""
+    try:
+        rel = Path(root).resolve().relative_to(Path(top).resolve()).as_posix()
+    except (OSError, ValueError, RuntimeError):
+        return ""
+    return "" if rel == "." else rel
+
+
+def _toplevel(root):
+    try:
+        return gitutil.toplevel(root)
+    except gitutil.GitError:
+        return Path(root)
+
+
 def find_repro(msg, changes, root, cfg):
-    base_root = (changes.root if changes is not None else "") or root
+    top = (changes.root if changes is not None else "") or _toplevel(root)
+    cwd = _project_cwd(root, top)
     files = changes.files if changes is not None else []
+    # Toplevel-relative: what gets copied into the baseline worktree.
     copy = [f.path for f in files if f.status in ("A", "M") and is_test_path(f.path)]
-    targets = [p for p in copy if _TEST_FILE.search(p)]
+    # Targets are relative to the project root; test files outside it are dropped.
+    prefix = cwd + "/" if cwd else ""
+    targets = [p[len(prefix):] for p in copy if _TEST_FILE.search(p) and p.startswith(prefix)]
     if targets:
-        cmd = _targeted(base_root, cfg, targets)
+        cmd = _targeted(root, cfg, targets)
         if cmd:
-            return ReproSpec(cmd, "tests", copy)
+            return ReproSpec(cmd, "tests", copy, cwd)
     configured = cfg_get(cfg, "repro", "command", default="")
     if configured:
-        return ReproSpec(split_command(configured), "config", copy)
+        return ReproSpec(split_command(configured), "config", copy, cwd)
     m = _REPRO_LINE.search(msg or "")
     if m:
-        return ReproSpec(split_command(m.group(1)), "claim", copy)
+        return ReproSpec(split_command(m.group(1)), "claim", copy, cwd)
     return None
 
 
@@ -109,8 +133,9 @@ def _is_link(path):
     return os.path.islink(path) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
 
 
-def _link_deps(root, wt):
-    src, dst = Path(root) / "node_modules", Path(wt) / "node_modules"
+def _link_deps(project, wt_project):
+    """Link project/node_modules into the same project directory of the worktree."""
+    src, dst = Path(project) / "node_modules", Path(wt_project) / "node_modules"
     if not src.is_dir() or os.path.lexists(dst):
         return []
     # dst did not exist before, so anything there now (even from a failed attempt)
@@ -162,12 +187,40 @@ def _env_failure(res):
     return res["code"] == 127 or bool(_ENV_FAILURE.search(res["output"][-4000:]))
 
 
+def _runner_kind(spec):
+    """Which red rules apply. Config and claim repros are arbitrary commands."""
+    if spec.source != "tests":
+        return "generic"
+    if any("pytest" in str(a) for a in spec.command):
+        return "pytest"
+    if list(spec.command[:2]) == ["go", "test"]:
+        return "go"
+    return "js"
+
+
+def _unclean(spec, red):
+    """Why a failing baseline run is not evidence that tests ran and failed, or None."""
+    out, code = red["output"], red["code"]
+    if _env_failure(red):
+        return "baseline could not run the repro (environment)"
+    kind = _runner_kind(spec)
+    if kind == "pytest" and code != 1:
+        return f"baseline could not run the repro cleanly (pytest exit {code})"
+    if kind == "js" and _JS_UNCLEAN.search(out):
+        return "baseline could not run the repro cleanly (test suite failed to load)"
+    if kind == "go" and _GO_UNCLEAN.search(out):
+        return "baseline could not run the repro cleanly (go build or setup failed)"
+    if kind == "go" and "--- FAIL" not in out:
+        return "baseline could not run the repro cleanly (no failing go test reported)"
+    return None
+
+
 def _judge(claim, spec, cmd, red, green):
     if green["code"] != 0:
         return Result(claim, "redgreen", cmd, "current tree: repro fails\n" + green["output"][-3000:], "fail")
-    if red["code"] != 0 and _env_failure(red):
-        return Result(claim, "redgreen", cmd, "baseline could not run the repro (environment):\n"
-                      + red["output"][-2000:], "inconclusive", 0.3)
+    why = _unclean(spec, red) if red["code"] != 0 else None
+    if why:
+        return Result(claim, "redgreen", cmd, why + ":\n" + red["output"][-2000:], "inconclusive", 0.3)
     if red["code"] != 0:
         return Result(claim, "redgreen", cmd, "fix proven: repro failed before the change and passes now\n"
                       + "baseline output:\n" + red["output"][-1500:], "pass")
@@ -176,11 +229,15 @@ def _judge(claim, spec, cmd, red, green):
     return suspect_result(claim, "redgreen", "fix not proven", [f], command=cmd)
 
 
-def _cleanup(root, wt, links):
-    """Remove the worktree. Returns False when it was left in place on purpose."""
+def _cleanup(root, wt, links, deps):
+    """Remove the worktree. Returns False when it was left in place on purpose.
+
+    `deps` is where the node_modules link goes inside the worktree."""
     links = list(links)
-    deps = Path(wt) / "node_modules"
-    if deps not in links and _is_link(deps):
+    deps = Path(deps)
+    # Only a candidate whose directory really lies inside the worktree, so a
+    # redirected project dir can never make us unlink something of the user's.
+    if deps not in links and _contained(wt, deps.parent) and _is_link(deps):
         links.append(deps)  # defense in depth: a link we lost track of is still a link
     for link in links:
         _unlink(link)
@@ -209,31 +266,50 @@ def run(claim, spec, root, base_commit, budget=None, marker_root=None):
     rem = budget.remaining()
     if rem is not None and rem < MIN_BUDGET:
         return Result(claim, "redgreen", cmd, "deferred: not enough inline budget", "deferred", 0.0)
-    wt, links = None, []
+    st = {"top": Path(root), "wt": None, "links": []}
+    left = False
     try:
-        work = _home(marker_root) / "work"
-        work.mkdir(parents=True, exist_ok=True)
-        # A fresh empty directory we own, so cleanup can never hit anything else.
-        wt = Path(tempfile.mkdtemp(prefix="wt-", dir=str(work)))
-        nohooks = str(work / ".no-hooks")
-        gitutil.git(root, "-c", f"core.hooksPath={nohooks}", "worktree", "add", "--detach",
-                    str(wt), base_commit, timeout=budget.timeout())
-        _copy_tests(root, wt, spec.copy_files)   # before linking: never copy through the link
-        links = _link_deps(root, wt)
-        red = run_command(spec.command, cwd=wt, timeout=budget.timeout(), env=_py_env(wt))
-        if red.get("timed_out"):
-            return Result(claim, "redgreen", cmd, "deferred: baseline run timed out", "deferred", 0.0)
-        green = run_command(spec.command, cwd=root, timeout=budget.timeout(), env=_py_env(root))
-        if green.get("timed_out"):
-            return Result(claim, "redgreen", cmd, "deferred: current run timed out", "deferred", 0.0)
-        return _judge(claim, spec, cmd, red, green)
+        result = _attempt(claim, spec, cmd, root, base_commit, budget, marker_root, st)
     except gitutil.GitError as e:
-        return Result(claim, "redgreen", cmd, f"could not create baseline worktree: {e}", "inconclusive", 0.2)
+        result = Result(claim, "redgreen", cmd, f"could not create baseline worktree: {e}", "inconclusive", 0.2)
     except OSError as e:
-        return Result(claim, "redgreen", cmd, f"could not prepare baseline worktree: {e}", "inconclusive", 0.2)
+        result = Result(claim, "redgreen", cmd, f"could not prepare baseline worktree: {e}", "inconclusive", 0.2)
     finally:
-        if wt is not None:
+        if st["wt"] is not None:
             try:
-                _cleanup(root, wt, links)
+                left = not _cleanup(st["top"], st["wt"], st["links"], _sub(st["wt"], spec.cwd) / "node_modules")
             except Exception:
                 pass
+    if left:
+        result.raw_output += (f"\nnote: baseline worktree left in place at {st['wt']} because a "
+                              "dependency link could not be removed; remove the link, then the worktree")
+    return result
+
+
+def _sub(base, rel):
+    return Path(base) / rel if rel else Path(base)
+
+
+def _attempt(claim, spec, cmd, root, base_commit, budget, marker_root, st):
+    top = gitutil.toplevel(root)
+    st["top"] = top
+    work = _home(marker_root) / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    # A fresh empty directory we own, so cleanup can never hit anything else.
+    wt = st["wt"] = Path(tempfile.mkdtemp(prefix="wt-", dir=str(work)))
+    nohooks = str(work / ".no-hooks")
+    gitutil.git(top, "-c", f"core.hooksPath={nohooks}", "worktree", "add", "--detach",
+                str(wt), base_commit, timeout=budget.timeout())
+    _copy_tests(top, wt, spec.copy_files)   # before linking: never copy through the link
+    red_dir, green_dir = _sub(wt, spec.cwd), _sub(top, spec.cwd)
+    if not red_dir.is_dir() or not _contained(wt, red_dir):
+        return Result(claim, "redgreen", cmd, f"baseline has no project directory {spec.cwd!r}",
+                      "inconclusive", 0.2)
+    st["links"] = _link_deps(green_dir, red_dir)
+    red = run_command(spec.command, cwd=red_dir, timeout=budget.timeout(), env=_py_env(red_dir))
+    if red.get("timed_out"):
+        return Result(claim, "redgreen", cmd, "deferred: baseline run timed out", "deferred", 0.0)
+    green = run_command(spec.command, cwd=green_dir, timeout=budget.timeout(), env=_py_env(green_dir))
+    if green.get("timed_out"):
+        return Result(claim, "redgreen", cmd, "deferred: current run timed out", "deferred", 0.0)
+    return _judge(claim, spec, cmd, red, green)

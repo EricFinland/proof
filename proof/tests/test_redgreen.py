@@ -137,12 +137,13 @@ def test_failed_unlink_never_deletes_through_link(git_repo, tmp_path, monkeypatc
 
     monkeypatch.setattr(redgreen, "_link_deps", spy)
     monkeypatch.setattr(redgreen, "_unlink", lambda link: None)  # simulate a failed unlink
-    _run(git_repo, tmp_path, b)
+    _, r = _run(git_repo, tmp_path, b)
     assert len(made) == 1
     assert (git_repo.path / "node_modules" / "keep.txt").read_text(encoding="utf-8") == "keep"
     # The worktree is left in place rather than risking a delete through the link.
     link = Path(made[0])
     assert os.path.lexists(link)
+    assert "left in place" in r.raw_output and str(link.parent) in r.raw_output
     # Test-side cleanup: remove the link itself first, then the worktree.
     if os.name == "nt":
         os.rmdir(link)
@@ -201,3 +202,137 @@ def test_low_budget_defers(git_repo, tmp_path):
     r = redgreen.run("I fixed the bug.", spec, git_repo.path, b.commit, Budget(5),
                      marker_root=tmp_path / "home")
     assert r.verdict == "deferred"
+
+
+# Ruling R9a: red needs evidence that tests ran and failed.
+
+def test_baseline_collection_error_is_inconclusive(git_repo, tmp_path):
+    # add() is already correct at the baseline; the "fix" only adds an unrelated
+    # marker() that the new test imports, so the baseline dies at collection.
+    b = _setup(git_repo, tmp_path, FIXED)
+    git_repo.write("calc.py", FIXED + "\n\ndef marker():\n    return 1\n")
+    git_repo.write("tests/test_calc.py",
+                   "from calc import add, marker\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+    spec, r = _run(git_repo, tmp_path, b)
+    assert spec.source == "tests"
+    assert r.verdict == "inconclusive", r.raw_output
+    assert "pytest exit 2" in r.raw_output
+
+
+def test_baseline_pytest_usage_error_is_inconclusive(git_repo, tmp_path):
+    # The fix adds a plugin that registers --myflag; the baseline pytest rejects it (exit 4).
+    b = _setup(git_repo, tmp_path, BUGGY)
+    git_repo.write("calc.py", FIXED)
+    git_repo.write("myplugin.py", "def pytest_addoption(parser):\n"
+                   "    parser.addoption('--myflag', action='store_true')\n")
+    git_repo.write("pyproject.toml", "[tool.pytest.ini_options]\npythonpath = [\".\"]\n"
+                   "addopts = \"-p myplugin\"\n")
+    git_repo.write("tests/test_calc.py", TEST)
+    spec = redgreen.ReproSpec(["python", "-m", "pytest", "-q", "--myflag", "tests/test_calc.py"],
+                              "tests", ["tests/test_calc.py"])
+    r = redgreen.run("I fixed the bug.", spec, git_repo.path, b.commit, Budget(None),
+                     marker_root=tmp_path / "home")
+    assert r.verdict == "inconclusive", r.raw_output
+    assert "pytest exit 4" in r.raw_output
+
+
+def _judge(cmd, red_code, red_out, source="tests"):
+    spec = redgreen.ReproSpec(cmd, source, ["t"])
+    green = {"code": 0, "output": "ok", "timed_out": False}
+    red = {"code": red_code, "output": red_out, "timed_out": False}
+    return redgreen._judge("I fixed it.", spec, " ".join(cmd), red, green).verdict
+
+
+def test_pytest_red_classification():
+    py = ["python", "-m", "pytest", "-q", "tests/test_x.py"]
+    assert _judge(py, 1, "FAILED tests/test_x.py::test_a - assert 1 == 2") == "pass"
+    for code in (2, 3, 4, 5):
+        assert _judge(py, code, "error: unrecognized arguments: --x") == "inconclusive"
+    assert _judge(py, 0, "1 passed") == "suspect"
+
+
+def test_go_red_classification():
+    go = ["go", "test", "./calc"]
+    assert _judge(go, 1, "--- FAIL: TestAdd (0.00s)\nFAIL\tex/calc") == "pass"
+    assert _judge(go, 1, "FAIL\tex/calc [build failed]") == "inconclusive"
+    assert _judge(go, 1, "FAIL\tex/calc [setup failed]") == "inconclusive"
+    assert _judge(go, 1, "./calc_test.go:9:2: undefined: Marker") == "inconclusive"
+    assert _judge(go, 1, "exit status 1") == "inconclusive"
+
+
+def test_js_red_classification():
+    for cmd in (["npm", "test", "--silent", "--", "a.test.js"], ["npx", "vitest", "run", "a.test.ts"],
+                ["npx", "jest", "a.test.js"], ["pnpm", "run", "test", "a.test.js"],
+                ["yarn", "run", "test", "a.test.js"], ["bun", "run", "test", "a.test.js"]):
+        assert _judge(cmd, 1, "expect(received).toBe(expected)\nTests: 1 failed") == "pass"
+        for out in ("Test suite failed to run", "Failed to load url ./calc", "Failed to resolve import",
+                    "Cannot find module './calc'", "SyntaxError: Unexpected token"):
+            assert _judge(cmd, 1, out) == "inconclusive", (cmd, out)
+
+
+def test_generic_sources_keep_the_simple_rule():
+    for source in ("config", "claim"):
+        assert _judge(["python", "-m", "pytest"], 2, "boom", source) == "pass"
+        assert _judge(["./repro.sh"], 1, "No module named x", source) == "inconclusive"
+
+
+# Ruling R9b: the repro runs in the requested project root.
+
+def _setup_app(repo, tmp_path, code):
+    repo.write(".gitignore", "node_modules/\n")
+    repo.write("README.md", "top level\n")
+    repo.write("app/pyproject.toml", "[tool.pytest.ini_options]\npythonpath = [\".\"]\n")
+    repo.write("app/calc.py", code)
+    repo.commit()
+    return baseline.capture(repo.path, "s", marker_root=tmp_path / "home")
+
+
+def _run_app(repo, tmp_path, b):
+    app = repo.path / "app"
+    cs = changeset.compute(repo.path, b)
+    spec = redgreen.find_repro("I fixed the bug.", cs, app, {})
+    return spec, redgreen.run("I fixed the bug.", spec, app, b.commit, Budget(None),
+                              marker_root=tmp_path / "home")
+
+
+def test_subdir_project_red_then_green_passes(git_repo, tmp_path, monkeypatch):
+    b = _setup_app(git_repo, tmp_path, BUGGY)
+    (git_repo.path / "app" / "node_modules").mkdir()
+    (git_repo.path / "app" / "node_modules" / "keep.txt").write_text("keep", encoding="utf-8")
+    git_repo.write("app/calc.py", FIXED)
+    git_repo.write("app/tests/test_calc.py", TEST)
+    git_repo.write("other/tests/test_other.py", "def test_o():\n    assert False\n")
+    made = []
+    real_link = redgreen._link_deps
+
+    def spy(project, wt_project):
+        links = real_link(project, wt_project)
+        made.extend(links)
+        return links
+
+    monkeypatch.setattr(redgreen, "_link_deps", spy)
+    spec, r = _run_app(git_repo, tmp_path, b)
+    assert spec.cwd == "app"
+    assert spec.command[-1:] == ["tests/test_calc.py"]  # other/ is outside the project root
+    assert r.verdict == "pass", r.raw_output
+    assert len(made) == 1 and Path(made[0]).parent.name == "app"
+    assert (git_repo.path / "app" / "node_modules" / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert git_repo.git("worktree", "list").count("\n") == 1
+    assert _work_empty(tmp_path)
+
+
+def test_subdir_project_noop_fix_fails(git_repo, tmp_path):
+    b = _setup_app(git_repo, tmp_path, BUGGY)
+    git_repo.write("app/calc.py", BUGGY + "# tidy\n")
+    git_repo.write("app/tests/test_calc.py", TEST)
+    _, r = _run_app(git_repo, tmp_path, b)
+    assert r.verdict == "fail", r.raw_output
+    assert _work_empty(tmp_path)
+
+
+def test_subdir_project_already_green_is_suspect(git_repo, tmp_path):
+    b = _setup_app(git_repo, tmp_path, FIXED)
+    git_repo.write("app/tests/test_calc.py", TEST)
+    _, r = _run_app(git_repo, tmp_path, b)
+    assert r.verdict == "suspect", r.raw_output
+    assert r.findings[0].file == "app/tests/test_calc.py"
