@@ -89,7 +89,9 @@ def decide_stop(payload, cwd, marker_root=None):
 
     in_fix_chain = False
     if not active:
+        # A new turn: nothing from an earlier turn is still owed a verifier.
         marker.chain_reset(session, root=marker_root)
+        marker.clear_pending(session, root=marker_root)
     else:
         state = marker.chain_state(session, root=marker_root)
         if state["count"] >= max_cycles:
@@ -97,12 +99,13 @@ def decide_stop(payload, cwd, marker_root=None):
         pend = marker.pending_entry(session, root=marker_root)
         if pend:
             key, entry = pend
-            if entry.get("attempts", 0) >= max_cycles:
-                return None
-            marker.record_attempt(session, entry.get("claim") or "", root=marker_root)
-            marker.chain_bump(session, root=marker_root)
-            return _block(NOT_RUN + _directive(entry.get("pending", []), tp, cwd,
-                                               session, key))
+            if entry.get("attempts", 0) < max_cycles:
+                marker.record_attempt(session, entry.get("claim") or "", root=marker_root)
+                marker.chain_bump(session, root=marker_root)
+                return _block(NOT_RUN + _directive(entry.get("pending", []), tp, cwd,
+                                                   session, key))
+            # Exhausted: stop asking for it, and let the normal chain logic decide.
+            marker.clear_pending(session, root=marker_root, key=key)
         if state["last"] not in ("fail", "suspect"):
             return None
         in_fix_chain = True

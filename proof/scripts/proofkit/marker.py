@@ -121,6 +121,20 @@ def set_pending(session: str, msg: str, strategies, root=None) -> None:
     _save(data, root)
 
 
+def clear_pending(session: str, root=None, key=None) -> None:
+    """Demote pending claims in the session (only `key` when given): last -> None, pending -> []."""
+    data = _load(root)
+    changed = False
+    for k, v in data.get(session, {}).items():
+        if (not k.startswith("_") and isinstance(v, dict) and v.get("last") == "pending"
+                and (key is None or k == key)):
+            v["last"] = None
+            v["pending"] = []
+            changed = True
+    if changed:
+        _save(data, root)
+
+
 def pending_entry(session: str, root=None):
     """Return (claim_key, entry) for the session's pending claim, or None."""
     for k, v in _load(root).get(session, {}).items():

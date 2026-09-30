@@ -126,3 +126,46 @@ def test_gate_never_skips_reworded_reclaim_in_fail_chain(tmp_path, monkeypatch):
     # the same gate stub does skip a fresh, first verification
     assert _stop(tmp_path, w, sid="fresh") is None
     assert calls == [1]
+
+
+TURN1 = "Done, the tests pass."
+
+
+def test_abandoned_pending_does_not_disable_next_turn_fix_loop(tmp_path):
+    home = tmp_path / "home"
+    empty = tmp_path / "empty"; empty.mkdir()
+    # turn 1: a deferred claim whose verifier is never run, re-blocked until the cap
+    assert _stop(tmp_path, empty, text=TURN1)["decision"] == "block"
+    for _ in range(4):
+        _stop(tmp_path, empty, text="ok, spawning it", active=True)
+    # turn 2: a fresh claim on a failing tree
+    w = _work(tmp_path, "tests_fail")
+    first = _stop(tmp_path, w)
+    assert first["decision"] == "block" and "FAIL tests" in first["reason"], first
+    assert "verification was not run" not in first["reason"]
+    second = _stop(tmp_path, w, active=True)
+    assert second is not None and second.get("decision") == "block", second
+    assert "attempt 2 of 3" in second["reason"] and "FAIL tests" in second["reason"]
+    assert marker.pending_entry("s1", root=home) is None
+
+
+def test_fresh_turn_does_not_reblock_old_pending_claim(tmp_path):
+    empty = tmp_path / "empty"; empty.mkdir()
+    assert _stop(tmp_path, empty, text=TURN1)["decision"] == "block"
+    w = _work(tmp_path, "tests_fail")
+    assert "FAIL tests" in _stop(tmp_path, w)["reason"]
+    out = _stop(tmp_path, w, active=True)
+    assert "verification was not run" not in out["reason"]
+    assert "attempt 2 of 3" in out["reason"]
+
+
+def test_exhausted_pending_in_fail_chain_falls_through_to_reverify(tmp_path):
+    home = tmp_path / "home"
+    w = _work(tmp_path, "tests_fail")
+    assert "FAIL tests" in _stop(tmp_path, w)["reason"]
+    marker.set_pending("s1", "Other claim, tests pass.", ["tests"], root=home)
+    for _ in range(3):
+        marker.record_attempt("s1", "Other claim, tests pass.", root=home)
+    out = _stop(tmp_path, w, active=True)
+    assert out["decision"] == "block" and "FAIL tests" in out["reason"], out
+    assert marker.pending_entry("s1", root=home) is None
