@@ -1,4 +1,4 @@
-# Proof
+# <img src="assets/logo.svg" alt="" width="40" align="top"> Proof
 
 [![tests](https://github.com/EricFinland/proof/actions/workflows/ci.yml/badge.svg)](https://github.com/EricFinland/proof/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
