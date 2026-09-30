@@ -32,7 +32,7 @@ _ENV_FAILURE = re.compile(
     r"command not found|No module named|Cannot find module|is not recognized as an internal"
     r"|ENOENT|no tests ran|collected 0 items|error: no such command", re.I)
 _JS_UNCLEAN = re.compile(r"Test suite failed to run|Failed to load|Failed to resolve import"
-                         r"|Cannot find module|SyntaxError")
+                         r"|Cannot find module|SyntaxError|No tests found|No test files found")
 _GO_UNCLEAN = re.compile(r"\[build failed\]|\[setup failed\]|undefined:")
 _NO_REPRO = "no repro found; add a test or a Repro: line"
 

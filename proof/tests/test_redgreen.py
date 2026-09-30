@@ -434,3 +434,11 @@ def test_run_sweeps_stale_worktrees_first(git_repo, tmp_path):
                  marker_root=tmp_path / "home")
     assert not os.path.lexists(wt)
     assert (git_repo.path / "node_modules" / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_js_no_tests_found_on_baseline_is_inconclusive():
+    for cmd in (["npx", "jest", "a.test.js"], ["npm", "test", "--", "a.test.js"],
+                ["npx", "vitest", "run", "a.test.ts"]):
+        for out in ("No tests found, exiting with code 1\nRun with `--passWithNoTests`",
+                    "No test files found, exiting with code 1"):
+            assert _judge(cmd, 1, out) == "inconclusive", (cmd, out)
