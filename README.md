@@ -17,6 +17,99 @@ No configuration. No success criteria to write. Arm it once, then work normally.
 
 ![Proof catching a false completion claim](assets/demo.gif)
 
+## Architecture
+
+Two hooks, one verdict. The SessionStart hook snapshots the repo before the agent
+touches anything. When the agent claims it is done, the Stop hook runs the real
+checks, diffs the tree against that snapshot, and decides whether the turn is
+allowed to end.
+
+```mermaid
+flowchart TB
+    START(["Session starts"]) -- "SessionStart hook" --> SNAP[("Baseline snapshot<br/>refs/proof/baseline/session")]
+    START --> WORK["Agent writes code"]
+    WORK --> CLAIM["Agent: All done, tests pass"]
+    CLAIM --> STOP{{"Proof Stop hook"}}
+    STOP --> CLS{"Completion<br/>claim?"}
+    CLS -- "no" --> END1(["Turn ends"])
+    CLS -- "yes" --> RUN
+
+    subgraph RUN["Inline verification, 90s budget"]
+        direction LR
+        STRAT["Real checks<br/>tests, build, types,<br/>lint, http"]
+        DIFF["ChangeSet<br/>diff vs baseline"]
+        TAMPER["Tamper rules<br/>skips, deletes, .only,<br/>gutted asserts"]
+        SCOPE["Scope check<br/>does the claim<br/>match the diff?"]
+        RG["Red-green<br/>fails before,<br/>passes now"]
+        DIFF --> TAMPER
+        DIFF --> SCOPE
+        DIFF --> RG
+    end
+
+    SNAP -.-> DIFF
+    RUN --> AGG{"Verdict"}
+
+    AGG -- "PASS" --> OK(["Turn ends<br/>Proof: PASS"])
+    AGG -- "FAIL" --> BLOCK["Blocked with<br/>the receipt"]
+    AGG -- "SUSPECT" --> ONCE["Blocked once,<br/>then you are told"]
+    AGG -- "slow or unsure" --> SUB["Verifier subagent<br/>proof verify --claim-key"]
+
+    BLOCK -. "agent fixes, claims again" .-> STOP
+    ONCE -. "agent reverts or explains" .-> STOP
+    SUB -.-> AGG
+    AGG -. "every run" .-> LEDGER[("proof-report.md<br/>honesty ledger")]
+
+    classDef proof fill:#F97316,stroke:#C2410C,color:#ffffff
+    classDef store fill:#1f2937,stroke:#F97316,color:#f9fafb
+    classDef bad fill:#7f1d1d,stroke:#ef4444,color:#fef2f2
+    classDef good fill:#14532d,stroke:#22c55e,color:#f0fdf4
+    class STOP,CLS,STRAT,DIFF,TAMPER,SCOPE,RG,AGG,SUB proof
+    class SNAP,LEDGER store
+    class BLOCK,ONCE bad
+    class OK good
+```
+
+### A lie, caught three ways
+
+What a session looks like when the agent first fails, then tries to game the
+test, then finally fixes the bug for real.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Agent
+    participant H as Proof hook
+    participant R as Repo
+
+    rect rgba(239, 68, 68, 0.14)
+    Note over A,R: Round 1, a real failure
+    A->>H: "All done, tests pass."
+    H->>R: pytest -q
+    R-->>H: 1 failed
+    H-->>A: BLOCK: FAIL tests, receipt inline
+    end
+
+    rect rgba(249, 115, 22, 0.16)
+    Note over A,R: Round 2, gaming the test
+    A->>R: adds @pytest.mark.skip to the failing test
+    A->>H: "Fixed, all tests pass now."
+    H->>R: pytest -q
+    R-->>H: 1 passed, 1 skipped
+    H->>R: diff vs session baseline
+    R-->>H: skip-added in tests/test_cart.py
+    H-->>A: BLOCK once: SUSPECT, possible test tampering
+    end
+
+    rect rgba(34, 197, 94, 0.14)
+    Note over A,R: Round 3, a real fix
+    A->>R: removes the skip, fixes the rounding bug
+    A->>H: "Fixed the rounding bug, tests pass."
+    H->>R: pytest -q, then red-green in a baseline worktree
+    R-->>H: fails before the fix, passes now
+    H-->>A: Proof: PASS (tests, redgreen)
+    end
+```
+
 ## v3: receipts that can't be faked
 
 v2 asked the agent to verify itself and report back. v3 stops trusting the agent
