@@ -9,7 +9,7 @@
 #                    "_suspect": [hash, ...]}}
 # Migration: old format stored {session: [key1, key2]} (list); each becomes {"attempts": 1, "last": null}.
 # v2 entries (no "claim"/"pending") are filled in lazily.
-import hashlib, json
+import hashlib, json, os, time
 from pathlib import Path
 
 
@@ -51,16 +51,36 @@ def _load(root) -> dict:
             if new_val is not val:
                 changed = True
         if changed:
-            p.write_text(json.dumps(migrated), encoding="utf-8")
+            try:
+                _save(migrated, root)
+            except OSError:
+                pass  # the migrated data is still returned; the next save persists it
         return migrated
     return {}
 
 
 def _save(data: dict, root) -> None:
+    """Atomic write. The tmp name is unique per process, so two hooks never share
+    it, and the replace is retried because Windows refuses it while another
+    process has the file open. On final failure the old file is left intact and
+    the error propagates to the caller (hook callers catch it)."""
     target = _store(root)
-    tmp = target.with_suffix(".tmp")
+    tmp = target.with_name(f"verified.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(data), encoding="utf-8")
-    tmp.replace(target)
+    try:
+        for attempt in range(3):
+            try:
+                os.replace(tmp, target)
+                return
+            except PermissionError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.05)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def _entry(data, session, key):

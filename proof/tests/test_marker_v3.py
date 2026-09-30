@@ -94,3 +94,37 @@ def test_record_attempt_by_key_bumps_that_key(tmp_path):
     m.record_attempt_by_key("s", m.claim_key(LONG), root=tmp_path)
     assert m.attempts("s", LONG, root=tmp_path) == 2
     assert m.get_claim("s", m.claim_key(LONG), root=tmp_path) == LONG.strip()
+
+
+def test_save_uses_pid_unique_tmp_and_retries_replace(tmp_path, monkeypatch):
+    import os
+    real = os.replace
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(str(src))
+        if len(calls) < 3:
+            raise PermissionError("file in use")
+        return real(src, dst)
+
+    monkeypatch.setattr(m.os, "replace", flaky)
+    m.record_attempt("s", MSG, root=tmp_path)
+    assert len(calls) == 3 and all(f"verified.{os.getpid()}.tmp" in c for c in calls)
+    assert m.attempts("s", MSG, root=tmp_path) == 1
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_save_failure_keeps_old_file(tmp_path, monkeypatch):
+    import os
+    import pytest
+    m.record_attempt("s", MSG, root=tmp_path)
+    before = (tmp_path / "verified.json").read_text(encoding="utf-8")
+
+    def locked(src, dst):
+        raise PermissionError("file in use")
+
+    monkeypatch.setattr(m.os, "replace", locked)
+    with pytest.raises(PermissionError):
+        m.record_attempt("s", MSG, root=tmp_path)
+    assert (tmp_path / "verified.json").read_text(encoding="utf-8") == before
+    assert not list(tmp_path.glob("*.tmp"))
