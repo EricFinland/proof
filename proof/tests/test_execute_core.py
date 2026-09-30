@@ -78,3 +78,19 @@ def test_run_command_env(tmp_path):
     res = run_command([PY, "-c", "import os; print(os.environ['PROOF_T'])"], cwd=tmp_path,
                       env={**__import__('os').environ, "PROOF_T": "yes"})
     assert "yes" in res["output"] and res["timed_out"] is False
+
+
+def test_run_command_timeout_kills_grandchild_holding_stdout(tmp_path):
+    import os, time
+    if os.name == "nt":
+        bat = tmp_path / "hold.bat"
+        bat.write_text("@echo started\r\n@ping -n 30 127.0.0.1\r\n", encoding="utf-8")
+        cmd = ["cmd", "/c", str(bat)]
+    else:
+        cmd = ["sh", "-c", "sleep 30 & sleep 30"]
+    t0 = time.monotonic()
+    res = run_command(cmd, cwd=tmp_path, timeout=2)
+    elapsed = time.monotonic() - t0
+    assert res["timed_out"] is True and res["code"] == -1
+    assert "TIMEOUT after 2s" in res["output"]
+    assert elapsed < 10, elapsed

@@ -383,3 +383,54 @@ def test_current_tree_env_failure_is_inconclusive_not_fail():
         r = redgreen._judge("I fixed it.", spec, "npm test", red, green)
         assert r.verdict == "inconclusive", r.raw_output
         assert "current tree could not run the repro (environment)" in r.raw_output
+
+
+def _stale_worktree(repo, tmp_path, name="wt-old"):
+    import time
+    work = tmp_path / "home" / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    wt = work / name
+    repo.git("worktree", "add", "--detach", str(wt), "HEAD")
+    (repo.path / "node_modules").mkdir(exist_ok=True)
+    (repo.path / "node_modules" / "keep.txt").write_text("keep", encoding="utf-8")
+    (wt / "sub").mkdir(exist_ok=True)
+    assert redgreen._make_link(repo.path / "node_modules", wt / "sub" / "node_modules")
+    old = time.time() - 7200
+    os.utime(wt, (old, old))
+    return wt
+
+
+def test_sweep_removes_stale_worktrees_without_touching_link_targets(git_repo, tmp_path):
+    _setup(git_repo, tmp_path, BUGGY)
+    wt = _stale_worktree(git_repo, tmp_path)
+    fresh = tmp_path / "home" / "work" / "wt-fresh"
+    fresh.mkdir()
+    other = tmp_path / "home" / "work" / "keepme"
+    other.mkdir()
+    os.utime(other, (0, 0))
+    redgreen._sweep(tmp_path / "home")
+    assert not os.path.lexists(wt)
+    assert (git_repo.path / "node_modules" / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert git_repo.git("worktree", "list").count("\n") == 1
+    assert fresh.is_dir() and other.is_dir()
+
+
+def test_sweep_keeps_stale_worktree_whose_link_cannot_be_removed(git_repo, tmp_path, monkeypatch):
+    _setup(git_repo, tmp_path, BUGGY)
+    wt = _stale_worktree(git_repo, tmp_path)
+    monkeypatch.setattr(redgreen, "_unlink", lambda link: None)
+    redgreen._sweep(tmp_path / "home")
+    assert wt.is_dir() and os.path.lexists(wt / "sub" / "node_modules")
+    assert (git_repo.path / "node_modules" / "keep.txt").read_text(encoding="utf-8") == "keep"
+    monkeypatch.undo()
+    redgreen._unlink(wt / "sub" / "node_modules")
+    git_repo.git("worktree", "remove", "--force", str(wt))
+
+
+def test_run_sweeps_stale_worktrees_first(git_repo, tmp_path):
+    _setup(git_repo, tmp_path, BUGGY)
+    wt = _stale_worktree(git_repo, tmp_path)
+    redgreen.run("I fixed the bug.", None, git_repo.path, "HEAD", Budget(None),
+                 marker_root=tmp_path / "home")
+    assert not os.path.lexists(wt)
+    assert (git_repo.path / "node_modules" / "keep.txt").read_text(encoding="utf-8") == "keep"

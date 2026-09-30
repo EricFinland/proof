@@ -59,18 +59,71 @@ def _resolve_program(cmd, env=None):
     return [found] + list(cmd[1:])
 
 
+def _kill_tree(p):
+    """Kill the process and everything it started (its own process group)."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)],
+                           capture_output=True, timeout=15)
+        else:
+            import signal
+            os.killpg(p.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        p.kill()
+    except OSError:
+        pass
+
+
+def _text(data):
+    if isinstance(data, bytes):
+        return data.decode("utf-8", "replace")
+    return data or ""
+
+
+def _close_pipes(p):
+    # On Windows a reader thread may still hold a pipe, and closing it there can
+    # block, so the close happens off the calling thread.
+    def close():
+        for f in (p.stdout, p.stderr):
+            try:
+                if f:
+                    f.close()
+            except Exception:
+                pass
+    import threading
+    threading.Thread(target=close, daemon=True).start()
+
+
 def run_command(cmd, cwd, timeout=DEFAULT_COMMAND_TIMEOUT, env=None):
     cmd = _resolve_program(cmd, env)
+    group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+             else {"start_new_session": True})
     try:
-        p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace",
-                           timeout=timeout, env=env)
-        return {"code": p.returncode, "output": (p.stdout or "") + (p.stderr or ""),
-                "timed_out": False}
+        p = subprocess.Popen(cmd, cwd=str(cwd), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                             errors="replace", env=env, **group)
     except FileNotFoundError:
         return {"code": 127, "output": f"command not found: {cmd[0]}", "timed_out": False}
+    try:
+        out, err = p.communicate(timeout=timeout)
+        return {"code": p.returncode, "output": (out or "") + (err or ""), "timed_out": False}
     except subprocess.TimeoutExpired:
-        return {"code": -1, "output": f"TIMEOUT after {timeout:.0f}s", "timed_out": True}
+        pass
+    _kill_tree(p)
+    try:
+        out, err = p.communicate(timeout=5)
+        read = (out or "") + (err or "")
+    except subprocess.TimeoutExpired as e:
+        # Something outside the tree still holds the pipes: keep what was read.
+        read = _text(e.output) + _text(e.stderr)
+        _close_pipes(p)
+    except (OSError, ValueError):
+        read = ""
+    head = f"TIMEOUT after {timeout:.0f}s"
+    return {"code": -1, "output": head + ("\n" + read[-3000:] if read.strip() else ""),
+            "timed_out": True}
 
 
 def verdict_for(res):

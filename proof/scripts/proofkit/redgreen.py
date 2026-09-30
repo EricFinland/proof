@@ -274,8 +274,72 @@ def _cleanup(root, wt, links, deps):
     return True
 
 
+STALE_AGE = 3600
+
+
+def _find_links(top):
+    """Every link under `top`, without following any link or junction."""
+    found, stack = [], [Path(top)]
+    while stack:
+        d = stack.pop()
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in entries:
+            if _is_link(e.path):
+                found.append(Path(e.path))
+            elif e.is_dir(follow_symlinks=False):
+                stack.append(Path(e.path))
+    return found
+
+
+def _owner_repo(wt):
+    """The main repository a worktree is registered with, from its .git file."""
+    try:
+        text = (Path(wt) / ".git").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    gitdir = Path(text[len("gitdir:"):].strip())
+    try:
+        common = (gitdir / (gitdir / "commondir").read_text(encoding="utf-8").strip()).resolve()
+    except OSError:
+        common = gitdir.parent.parent
+    root = common.parent if common.name == ".git" else common
+    return root if root.is_dir() else None
+
+
+def _sweep(marker_root=None, now=None):
+    """Remove baseline worktrees an interrupted run left behind (older than an hour).
+
+    Same safety rules as a normal cleanup: every link is unlinked first, and a
+    directory that still holds a link is left alone. Only each stale worktree's
+    own registration is removed."""
+    import time
+    work = _home(marker_root) / "work"
+    now = now or time.time()
+    try:
+        candidates = [p for p in work.glob("wt-*") if p.is_dir() and not _is_link(p)]
+    except OSError:
+        return
+    for wt in candidates:
+        try:
+            if now - os.lstat(wt).st_mtime <= STALE_AGE:
+                continue
+            owner = _owner_repo(wt) or work
+            _cleanup(owner, wt, _find_links(wt), Path(wt) / "node_modules")
+        except Exception:
+            continue
+
+
 def run(claim, spec, root, base_commit, budget=None, marker_root=None):
     budget = budget or Budget(None)
+    try:
+        _sweep(marker_root)
+    except Exception:
+        pass
     if spec is None:
         return Result(claim, "redgreen", "", _NO_REPRO, "inconclusive", 0.0)
     cmd = " ".join(spec.command)
