@@ -13,7 +13,7 @@ from proofkit.classifier import detect_claim
 from proofkit.config import cfg_get, load_config
 from proofkit.extractor import extract_claims
 from proofkit.transcript import last_assistant_text
-from proofkit import marker
+from proofkit import gitutil, marker
 from proofkit.strategies.base import Budget
 
 DEFAULT_BUDGET = 90
@@ -112,6 +112,23 @@ def _final_message(session, marker_root, pend=None):
     return None
 
 
+def _forget_if_tree_changed(session, msg, cwd, marker_root):
+    """A pass or inconclusive only covers the tree it was measured on. If the same
+    claim comes back after the tree changed, it is verified again as a fresh claim.
+    Outside git there is no fingerprint and the earlier outcome stands."""
+    try:
+        if marker.last_outcome(session, msg, root=marker_root) not in ("pass", "inconclusive"):
+            return
+        before = marker.claim_tree(session, msg, root=marker_root)
+        if not before:
+            return
+        now = gitutil.fingerprint(cwd)
+        if now and now != before:
+            marker.reset_claim(session, msg, root=marker_root)
+    except Exception:
+        pass
+
+
 def decide_stop(payload, cwd, marker_root=None):
     session = payload.get("session_id", "unknown")
     tp = payload.get("transcript_path", "")
@@ -148,6 +165,7 @@ def decide_stop(payload, cwd, marker_root=None):
     msg = last_assistant_text(tp)
     if not detect_claim(msg).is_claim:
         return _final_message(session, marker_root) if in_fix_chain else None
+    _forget_if_tree_changed(session, msg, cwd, marker_root)
     if not marker.should_block(session, msg, max_cycles=max_cycles, root=marker_root):
         return _final_message(session, marker_root) if in_fix_chain else None
 
@@ -235,7 +253,9 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
                       system_message)
 
     if outcome.overall != "suspect":
-        marker.record_outcome(session, msg, outcome.overall, root=marker_root)
+        tree = (gitutil.fingerprint(root) if outcome.overall in ("pass", "inconclusive")
+                else None)
+        marker.record_outcome(session, msg, outcome.overall, root=marker_root, tree=tree)
     if system_message:
         return {"systemMessage": system_message}
     methods = ", ".join(sorted({r.method for r in outcome.results}))

@@ -73,6 +73,18 @@ def snapshot_tree(root):
                 pass
 
 
+def fingerprint(root):
+    """Tree SHA of the whole working tree at the git toplevel, or None outside git.
+
+    Never raises."""
+    try:
+        if not is_repo(root):
+            return None
+        return snapshot_tree(toplevel(root)) or None
+    except Exception:
+        return None
+
+
 def commit_tree(root, tree, parent=None, message="proof baseline"):
     args = ["commit-tree", tree, "-m", message]
     if parent:

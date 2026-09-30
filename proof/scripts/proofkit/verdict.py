@@ -243,10 +243,15 @@ def run_verify(transcript="", root=".", out_dir=".", session_id=None, as_json=Fa
             from proofkit.marker import record_outcome, record_outcome_by_key
             verdict_map = {v: k for k, v in EXIT.items()}
             verdict = verdict_map.get(exit_code, "inconclusive")
+            tree = None
+            if verdict in ("pass", "inconclusive"):
+                from proofkit.gitutil import fingerprint
+                tree = fingerprint(root)
             if claim_key:
-                record_outcome_by_key(session_id, claim_key, verdict, root=marker_root)
+                record_outcome_by_key(session_id, claim_key, verdict, root=marker_root,
+                                      tree=tree)
             else:
-                record_outcome(session_id, msg, verdict, root=marker_root)
+                record_outcome(session_id, msg, verdict, root=marker_root, tree=tree)
         except Exception:
             pass  # never let marker failures affect the verdict
 

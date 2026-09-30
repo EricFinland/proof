@@ -192,3 +192,26 @@ def test_pending_cap_tells_user_claim_was_never_verified(tmp_path):
     assert final is not None and "decision" not in final, final
     assert final["systemMessage"].startswith("Proof: INCONCLUSIVE")
     assert "never verified" in final["systemMessage"]
+
+
+def test_repeated_claim_is_reverified_after_the_tree_changes(git_repo, tmp_path):
+    home = tmp_path / "home"
+    git_repo.write(".gitignore", "__pycache__/\n.pytest_cache/\nproof-report.md\n")
+    git_repo.write("pyproject.toml", "[tool.pytest.ini_options]\n")
+    git_repo.write("test_ok.py", "def test_ok():\n    assert 1 == 1\n")
+    git_repo.commit()
+    first = _stop(tmp_path, git_repo.path)
+    assert first["systemMessage"].startswith("Proof: PASS"), first
+    # the same words on an unchanged tree are not re-run
+    assert _stop(tmp_path, git_repo.path) is None
+    git_repo.write("test_ok.py", "def test_ok():\n    assert 1 == 2\n")
+    out = _stop(tmp_path, git_repo.path)
+    assert out is not None and out.get("decision") == "block", out
+    assert "FAIL tests" in out["reason"]
+
+
+def test_repeated_claim_outside_git_keeps_prior_pass(tmp_path):
+    w = _work(tmp_path, "tests_pass")
+    assert _stop(tmp_path, w)["systemMessage"].startswith("Proof: PASS")
+    (w / "test_ok.py").write_text("def test_ok():\n    assert 1 == 2\n", encoding="utf-8")
+    assert _stop(tmp_path, w) is None
