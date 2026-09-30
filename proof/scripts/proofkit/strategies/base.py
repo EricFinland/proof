@@ -111,6 +111,11 @@ def run_command(cmd, cwd, timeout=DEFAULT_COMMAND_TIMEOUT, env=None):
         return {"code": p.returncode, "output": (out or "") + (err or ""), "timed_out": False}
     except subprocess.TimeoutExpired:
         pass
+    except BaseException:
+        # Ctrl+C or any other error: the child runs in its own group, so nothing
+        # else would stop it.
+        _kill_tree(p)
+        raise
     _kill_tree(p)
     try:
         out, err = p.communicate(timeout=5)

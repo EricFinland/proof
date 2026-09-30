@@ -442,3 +442,15 @@ def test_js_no_tests_found_on_baseline_is_inconclusive():
         for out in ("No tests found, exiting with code 1\nRun with `--passWithNoTests`",
                     "No test files found, exiting with code 1"):
             assert _judge(cmd, 1, out) == "inconclusive", (cmd, out)
+
+
+def test_passing_green_output_is_never_an_environment_failure():
+    spec = redgreen.ReproSpec(["npx", "jest", "a.test.js"], "claim", ["t"])
+    red = {"code": 1, "output": "expect(received).toBe(expected)\nTests: 1 failed", "timed_out": False}
+    green = {"code": 0, "output": "PASS a.test.js\n  throws ENOENT when config is missing", "timed_out": False}
+    assert redgreen._judge("I fixed it.", spec, "npx jest", red, green).verdict == "pass"
+    spec = redgreen.ReproSpec(["./repro.sh"], "claim", ["t"])
+    red = {"code": 0, "output": "ok: No module named foo is handled", "timed_out": False}
+    green = {"code": 0, "output": "ok: No module named foo is handled", "timed_out": False}
+    r = redgreen._judge("I fixed it.", spec, "./repro.sh", red, green)
+    assert r.verdict == "suspect" and r.findings[0].rule == "repro-already-green"

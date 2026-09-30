@@ -94,3 +94,20 @@ def test_run_command_timeout_kills_grandchild_holding_stdout(tmp_path):
     assert res["timed_out"] is True and res["code"] == -1
     assert "TIMEOUT after 2s" in res["output"]
     assert elapsed < 10, elapsed
+
+
+def test_run_command_kills_tree_when_interrupted(tmp_path, monkeypatch):
+    import subprocess
+    import pytest
+    from proofkit.strategies import base
+    killed = []
+    real_kill = base._kill_tree
+    monkeypatch.setattr(base, "_kill_tree", lambda p: killed.append(p.pid) or real_kill(p))
+
+    def interrupted(self, *a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        run_command([PY, "-c", "import time; time.sleep(30)"], cwd=tmp_path, timeout=60)
+    assert len(killed) == 1
