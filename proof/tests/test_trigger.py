@@ -133,3 +133,35 @@ def test_transcript_path_is_directory_is_silent(tmp_path):
              tmp_path / "home", cwd=_empty(tmp_path))
     assert r.returncode == 0
     assert r.stdout.strip() == ""
+
+
+def test_trigger_import_error_prints_nothing(tmp_path):
+    scripts = tmp_path / "scripts"
+    (scripts / "proofkit").mkdir(parents=True)
+    shutil.copy(TRIGGER, scripts / "proof_trigger.py")
+    (scripts / "proofkit" / "__init__.py").write_text("", encoding="utf-8")
+    (scripts / "proofkit" / "hookflow.py").write_text("raise ImportError('broken install')\n",
+                                                     encoding="utf-8")
+    p = subprocess.run([sys.executable, str(scripts / "proof_trigger.py")],
+                       input=json.dumps({"session_id": "s", "transcript_path": ""}),
+                       capture_output=True, text=True, cwd=str(tmp_path),
+                       env=dict(os.environ, PROOF_HOME=str(tmp_path / "home")))
+    assert p.returncode == 0 and p.stdout == "" and p.stderr == "", (p.stdout, p.stderr)
+
+
+def test_trigger_swallows_stderr_noise(tmp_path, monkeypatch, capsys):
+    import io
+    sys.path.insert(0, str(Path(TRIGGER).parent))
+    import proof_trigger
+
+    def noisy(payload, cwd, marker_root=None):
+        print("noise on stdout")
+        print("noise on stderr", file=sys.stderr)
+        return {"systemMessage": "ok"}
+
+    monkeypatch.setattr(proof_trigger, "decide_stop", noisy)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "s"})))
+    monkeypatch.chdir(tmp_path)
+    proof_trigger.main()
+    out = capsys.readouterr()
+    assert json.loads(out.out) == {"systemMessage": "ok"} and out.err == "", out
