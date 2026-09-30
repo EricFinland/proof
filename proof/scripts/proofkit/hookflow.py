@@ -79,6 +79,39 @@ def _fail_receipts(outcome):
     return "\n\n".join(parts)
 
 
+_SUMMARY_LINES = 20
+
+
+def _summary(outcome):
+    """Up to 20 rendered finding or failure lines for the chain record."""
+    lines = []
+    for r in outcome.results:
+        if r.verdict not in ("fail", "suspect"):
+            continue
+        if r.findings:
+            lines += [f"{r.verdict.upper()} {r.method}: {f.render()}" for f in r.findings]
+            continue
+        lines.append(f"{r.verdict.upper()} {r.method}: `{r.command}`")
+        tail = [ln.rstrip() for ln in r.raw_output.strip().splitlines() if ln.strip()]
+        lines += ["  " + ln[:200] for ln in tail[-5:]]
+    return "\n".join(lines[:_SUMMARY_LINES]) or None
+
+
+def _final_message(session, marker_root, pend=None):
+    """What the user is told when the chain ends without a passing re-verification."""
+    last = marker.chain_state(session, root=marker_root)["last"]
+    if last in ("fail", "suspect"):
+        summary = marker.chain_summary(session, root=marker_root) or "see proof-report.md"
+        return {"systemMessage": f"Proof: {last.upper()}. The last verification of the "
+                                 "completion claim did not pass, and it was not re-verified "
+                                 "before the turn ended:\n" + summary}
+    if pend:
+        checks = ", ".join(pend[1].get("pending") or []) or "the claim"
+        return {"systemMessage": "Proof: INCONCLUSIVE. The completion claim was never "
+                                 f"verified: the independent verifier did not run ({checks})."}
+    return None
+
+
 def decide_stop(payload, cwd, marker_root=None):
     session = payload.get("session_id", "unknown")
     tp = payload.get("transcript_path", "")
@@ -94,9 +127,10 @@ def decide_stop(payload, cwd, marker_root=None):
         marker.clear_pending(session, root=marker_root)
     else:
         state = marker.chain_state(session, root=marker_root)
-        if state["count"] >= max_cycles:
-            return None
         pend = marker.pending_entry(session, root=marker_root)
+        if state["count"] >= max_cycles:
+            return _final_message(session, marker_root, pend)
+        exhausted = None
         if pend:
             key, entry = pend
             if entry.get("attempts", 0) < max_cycles:
@@ -106,15 +140,16 @@ def decide_stop(payload, cwd, marker_root=None):
                                                    session, key))
             # Exhausted: stop asking for it, and let the normal chain logic decide.
             marker.clear_pending(session, root=marker_root, key=key)
+            exhausted = pend
         if state["last"] not in ("fail", "suspect"):
-            return None
+            return _final_message(session, marker_root, exhausted)
         in_fix_chain = True
 
     msg = last_assistant_text(tp)
     if not detect_claim(msg).is_claim:
-        return None
+        return _final_message(session, marker_root) if in_fix_chain else None
     if not marker.should_block(session, msg, max_cycles=max_cycles, root=marker_root):
-        return None
+        return _final_message(session, marker_root) if in_fix_chain else None
 
     # Only a fresh, first verification may be skipped by the gate. A re-claim inside a
     # fail/suspect chain is always re-verified, even when its wording is new.
@@ -167,7 +202,8 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
     n = marker.chain_state(session, root=marker_root)["count"]
 
     if outcome.overall == "fail":
-        marker.record_outcome(session, msg, "fail", root=marker_root)
+        marker.record_outcome(session, msg, "fail", root=marker_root,
+                              summary=_summary(outcome))
         return _block(_with_hint(FAIL_HEAD.format(n=n, max=max_cycles)
                                  + _fail_receipts(outcome) + FAIL_TAIL, notes))
 
@@ -177,7 +213,8 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
         found = [f for r in outcome.results if r.verdict == "suspect" for f in r.findings]
         text = "\n".join(f.render() for f in found)
         h = findings_hash(found)
-        marker.record_outcome(session, msg, "suspect", root=marker_root)
+        marker.record_outcome(session, msg, "suspect", root=marker_root,
+                              summary=_summary(outcome))
         if not marker.suspect_seen(session, h, root=marker_root):
             marker.mark_suspect_seen(session, h, root=marker_root)
             # On the last chain slot no later stop can show the user these findings,

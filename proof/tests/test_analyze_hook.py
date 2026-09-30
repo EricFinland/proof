@@ -103,3 +103,16 @@ def test_analyzer_orchestration_error_does_not_escape(git_repo, tmp_path, monkey
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     out = _stop(tmp_path, git_repo.path)
     assert out["systemMessage"].startswith("Proof: PASS")
+
+
+def test_suspect_then_explanation_tells_user(git_repo, tmp_path):
+    _py_repo(git_repo)
+    baseline.capture(git_repo.path, "s", marker_root=tmp_path / "home")
+    git_repo.write("tests/test_a.py", "import pytest\n\ndef test_a():\n    assert 1 == 1\n\n"
+                   "@pytest.mark.skip\ndef test_b():\n    assert 2 == 2\n")
+    first = _stop(tmp_path, git_repo.path)
+    assert first["decision"] == "block" and "skip-added" in first["reason"]
+    out = _stop(tmp_path, git_repo.path, active=True,
+                text="The skip is intentional: test_b hits a flaky external service.")
+    assert out is not None and "decision" not in out, out
+    assert out["systemMessage"].startswith("Proof: SUSPECT") and "skip-added" in out["systemMessage"]

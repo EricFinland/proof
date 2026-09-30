@@ -4,7 +4,7 @@
 # Schema: {session: {claim_key: {"attempts": int,
 #                                "last": "pass"|"fail"|"suspect"|"inconclusive"|"pending"|null,
 #                                "claim": str|null, "pending": [strategy, ...]},
-#                    "_chain": {"count": int, "last": str|null},
+#                    "_chain": {"count": int, "last": str|null, "summary": str|null},
 #                    "_suspect": [hash, ...]}}
 # Migration: old format stored {session: [key1, key2]} (list); each becomes {"attempts": 1, "last": null}.
 # v2 entries (no "claim"/"pending") are filled in lazily.
@@ -79,20 +79,31 @@ def record_attempt(session: str, msg: str, root=None) -> None:
     _save(data, root)
 
 
-def record_outcome(session: str, msg: str, verdict: str, root=None) -> None:
+def record_outcome(session: str, msg: str, verdict: str, root=None, summary=None) -> None:
     """Set the last outcome for this (session, msg). Creates entry if absent."""
-    record_outcome_by_key(session, claim_key(msg), verdict, root=root)
+    record_outcome_by_key(session, claim_key(msg), verdict, root=root, summary=summary)
 
 
-def record_outcome_by_key(session: str, key: str, verdict: str, root=None) -> None:
-    """Set the last outcome for a claim key, clear pending, and update the chain."""
+def record_outcome_by_key(session: str, key: str, verdict: str, root=None,
+                          summary=None) -> None:
+    """Set the last outcome for a claim key, clear pending, and update the chain.
+
+    `summary` is a short rendering of the outcome kept on the chain, so a turn that
+    ends without re-verifying can still tell the user what failed."""
     data = _load(root)
     e = _entry(data, session, key)
     e["last"] = verdict
     e["pending"] = []
     chain = data[session].setdefault("_chain", {"count": 0, "last": None})
     chain["last"] = verdict
+    chain["summary"] = summary
     _save(data, root)
+
+
+def chain_summary(session: str, root=None):
+    """The summary stored with the chain's last outcome, or None."""
+    c = _load(root).get(session, {}).get("_chain") or {}
+    return c.get("summary")
 
 
 def get_claim(session: str, key: str, root=None):

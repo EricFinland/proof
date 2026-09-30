@@ -74,7 +74,11 @@ def test_fix_loop_runs_inside_chain_and_terminates(tmp_path):
     assert "attempt 2 of 3" in second["reason"]
     third = _stop(tmp_path, w, active=True)
     assert "attempt 3 of 3" in third["reason"]
-    assert _stop(tmp_path, w, active=True) is None
+    # the cap ends the loop, but the user is told the claim still fails
+    final = _stop(tmp_path, w, active=True)
+    assert final is not None and "decision" not in final, final
+    assert final["systemMessage"].startswith("Proof: FAIL")
+    assert "FAIL tests" in final["systemMessage"] and "assert 1 == 2" in final["systemMessage"]
 
 
 def test_chain_stops_after_pass(tmp_path):
@@ -169,3 +173,22 @@ def test_exhausted_pending_in_fail_chain_falls_through_to_reverify(tmp_path):
     out = _stop(tmp_path, w, active=True)
     assert out["decision"] == "block" and "FAIL tests" in out["reason"], out
     assert marker.pending_entry("s1", root=home) is None
+
+
+def test_giving_up_in_fail_chain_tells_user(tmp_path):
+    w = _work(tmp_path, "tests_fail")
+    assert "FAIL tests" in _stop(tmp_path, w)["reason"]
+    out = _stop(tmp_path, w, text="I could not get this one working.", active=True)
+    assert out is not None and "decision" not in out, out
+    assert out["systemMessage"].startswith("Proof: FAIL") and "assert 1 == 2" in out["systemMessage"]
+
+
+def test_pending_cap_tells_user_claim_was_never_verified(tmp_path):
+    empty = tmp_path / "empty"; empty.mkdir()
+    assert _stop(tmp_path, empty)["decision"] == "block"
+    outs = [_stop(tmp_path, empty, text="ok, spawning it", active=True) for _ in range(3)]
+    assert all(o and o.get("decision") == "block" for o in outs[:2]), outs
+    final = outs[2]
+    assert final is not None and "decision" not in final, final
+    assert final["systemMessage"].startswith("Proof: INCONCLUSIVE")
+    assert "never verified" in final["systemMessage"]
