@@ -44,7 +44,8 @@ baseline for the session:
    real index and working tree are untouched.
 2. `git commit-tree` on that tree, parented on `HEAD`.
 3. `git update-ref refs/proof/baseline/<session> <commit>` so garbage collection
-   keeps it.
+   keeps it. The commit holds copies of untracked files and appears in
+   `git log --all` until it is pruned.
 4. A record in `$PROOF_HOME/baselines/<session>.json` (default `~/.proof`).
 5. Baseline refs and records older than 7 days are pruned.
 
@@ -125,10 +126,12 @@ work is complete. These checks still need an independent verifier: ...
 
 Each of these re-blocks counts as an attempt on the claim and a block in the
 chain. When the claim reaches `max_fix_cycles` attempts, or the chain reaches
-`max_fix_cycles` blocks, the hook lets the turn end.
+`max_fix_cycles` blocks, the hook lets the turn end with a message that the claim
+was never verified.
 
 Only one claim per session is pending at a time. A newer pending claim demotes
-the older one.
+the older one, and a new turn clears it, so a verifier left unrun in one turn is
+never demanded in the next.
 
 ## Chain cap
 

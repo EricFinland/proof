@@ -86,7 +86,7 @@ def analyze(msg, changes, root=""):
     paths, syms = named_items(msg, changed)
     if not files:
         if _FIRST_PERSON_FIX.search(msg) or paths or syms:
-            return [Finding("empty-change", "", 0, "no files changed since the session started")]
+            return [Finding("empty-change", "", 0, "no files changed since the baseline")]
         return []
     out = []
     code = [f for f in files if not _DOC.search(f.path)]

@@ -32,7 +32,7 @@ Arming installs two hooks:
 
 | Verdict | Exit | Meaning |
 |---|---|---|
-| PASS | 0 | Every check ran and passed. |
+| PASS | 0 | No check failed or looked gamed, and at least one check passed. |
 | FAIL | 1 | At least one check failed. The receipt is the command output. |
 | INCONCLUSIVE | 2 | Nothing could be checked definitively. |
 | SUSPECT | 3 | The checks pass, but the diff shows they were gamed (skipped or deleted tests, gutted asserts, a neutered test command), a fix that was never red, or a claim the diff contradicts. |

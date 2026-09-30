@@ -150,8 +150,9 @@ Maximum number of blocks in one continuation chain. A chain starts when the
 agent stops on its own and continues for as long as Proof keeps blocking it.
 Every block counts: a FAIL receipt, a SUSPECT block, a subagent directive, and a
 "verification was not run" re-block. Once the chain reaches this many blocks,
-Proof lets the turn end so the agent is never stuck in an infinite loop. The
-same cap applies per claim: a claim that has been blocked this many times in the
+Proof lets the turn end so the agent is never stuck in an infinite loop, and shows
+the user the last verdict (a FAIL or SUSPECT with its receipts, or a note that a
+pending claim was never verified). The same cap applies per claim: a claim that has been blocked this many times in the
 session is not blocked again. A passing verdict ends the loop immediately.
 
 - **Type:** integer
@@ -217,7 +218,9 @@ Whether the SessionStart hook captures a git baseline for the session. The
 baseline is a commit of the full working tree (tracked and untracked files,
 minus anything git ignores), written with a temporary index under
 `refs/proof/baseline/<session>`. Refs and records older than 7 days are pruned
-on the next capture. Your index and working tree are never modified.
+on the next capture. Your index and working tree are never modified. The
+baseline commits hold copies of untracked files and appear in `git log --all`
+(and in tools that list every ref) until they are pruned.
 
 When disabled, or when Proof is armed mid-session, the diff analyzers fall
 back to `HEAD` and the report notes "baseline: HEAD (approximate)". Scope and

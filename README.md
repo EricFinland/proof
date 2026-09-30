@@ -229,7 +229,7 @@ python proof/scripts/proof.py verify --transcript <path> --root <repo>
 
 | Verdict | Exit | Meaning |
 |---------|------|---------|
-| PASS | 0 | Every check ran and passed, and nothing in the diff undermines it. |
+| PASS | 0 | No check failed or looked gamed, and at least one check passed. |
 | FAIL | 1 | A check failed. The receipt is the command and its output. |
 | INCONCLUSIVE | 2 | Nothing could be checked definitively (no runner, command not found, timed out). |
 | SUSPECT | 3 | The checks pass, but the tests were gamed, the fix was never red, or the claim contradicts the diff. |
@@ -244,6 +244,8 @@ an analysis with a note in the report; they never produce FAIL or SUSPECT.
    (tracked and untracked, minus anything git ignores) into a commit under
    `refs/proof/baseline/<session>`, using a temporary index. Your index and
    working tree are never touched. Baselines older than 7 days are pruned.
+   Because the snapshot includes untracked files, those commits hold copies of
+   them, and they show up in `git log --all` until pruned.
 2. **Claim detection.** On Stop, `proof_trigger.py` pulls the agent's last
    message and runs a precision classifier. It is tuned against real-world traps
    ("I fixed a typo", "the done button is broken", "should work eventually") so
@@ -326,7 +328,13 @@ Proof re-verifies the new claim even if it is worded differently.
 Every block in the chain counts: FAIL receipts, SUSPECT blocks, subagent
 directives, and "verification was not run" re-blocks. After `max_fix_cycles`
 blocks (default 3, override in `.proof.toml`), Proof lets the turn end so you are
-not stuck in an infinite loop. A passing verdict ends the loop immediately.
+not stuck in an infinite loop, and tells you the last verdict with its failing
+checks or findings. The same happens when the agent stops without re-claiming
+after a FAIL or SUSPECT block. A passing verdict ends the loop immediately.
+
+A claim that passed is not re-run when the agent repeats it word for word,
+unless the working tree changed since that pass (git repositories only). A new
+turn never re-asks for a verifier the previous turn left pending.
 
 ## proof stats
 
@@ -455,8 +463,8 @@ Proof is honest about where its checks stop.
 - **No baseline, fewer checks.** If Proof is armed mid-session it diffs against
   `HEAD`, marked approximate, and skips the scope and red-green checks. Outside a
   git repository, all three analyzers are skipped.
-- **The cap is a cap.** After `max_fix_cycles` blocks Proof lets the turn end.
-  The report and ledger still record the verdict.
+- **The cap is a cap.** After `max_fix_cycles` blocks Proof lets the turn end
+  and shows you the last verdict. The report and ledger still record it.
 
 ## Design
 
@@ -468,8 +476,12 @@ Proof is honest about where its checks stop.
 - **Strict aggregation.** Any single failed check fails the entire verdict, and
   a SUSPECT finding outranks any number of passes.
 - **Hands off your tree.** Proof writes only temporary index files,
-  `refs/proof/*`, and temporary worktrees under `~/.proof/work`. It never
-  modifies your working tree or index.
+  `refs/proof/*`, temporary worktrees under `~/.proof/work`, and
+  `proof-report.md` in the project root (or `--out-dir`). It never modifies your
+  working tree or index.
+- **State lives in `~/.proof`** (or `$PROOF_HOME`): `verified.json` for claim
+  attempts and outcomes, `baselines/` for session baseline records,
+  `ledger.jsonl` for `proof stats`, and `work/` for red-green worktrees.
 - **Cross-platform.** Tested on Linux and Windows in CI.
 
 Full design and contract docs live in

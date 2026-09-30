@@ -69,7 +69,7 @@ when it has no line number (a deleted file, for instance). Snippets are cut to
 
 | Analyzer | Headline |
 |---|---|
-| `tamper` | `possible test tampering: 2 skips added and 1 test file deleted` (counts per rule) |
+| `tamper` | `possible test tampering: 1 test file deleted and 2 skips added` (counts per rule, in rule order) |
 | `scope` | `claim does not match the diff: docs-only, named-path-unchanged` (rule ids) |
 | `redgreen` | `fix not proven` |
 
