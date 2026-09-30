@@ -64,3 +64,26 @@ def disarm(settings_path: Path) -> None:
 def is_armed(settings_path: Path) -> bool:
     data = _load(Path(settings_path))
     return any(MARK in json.dumps(h) for h in data.get("hooks", {}).get("Stop", []))
+
+
+def _ours(hooks: dict, event: str, mark: str) -> list:
+    """Our command hooks under one event."""
+    out = []
+    for entry in hooks.get(event, []) or []:
+        inner = entry.get("hooks", []) if isinstance(entry, dict) else []
+        out += [h for h in inner if isinstance(h, dict) and mark in json.dumps(h)]
+    return out
+
+
+def status(settings_path: Path) -> str:
+    """"disarmed", "armed", or "v2" (armed by an older version: the Stop hook has
+    no timeout or there is no SessionStart hook)."""
+    if not is_armed(settings_path):
+        return "disarmed"
+    hooks = _load(Path(settings_path)).get("hooks", {})
+    stop = _ours(hooks, "Stop", MARK)
+    if not stop or any("timeout" not in h for h in stop):
+        return "v2"
+    if not _ours(hooks, "SessionStart", SESSION_MARK):
+        return "v2"
+    return "armed"

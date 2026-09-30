@@ -99,7 +99,12 @@ def main(argv=None):
     if args.cmd == "disarm":
         install.disarm(_settings(args)); print("Proof disarmed."); return 0
     if args.cmd == "status":
-        print("armed" if install.is_armed(_settings(args)) else "disarmed"); return 0
+        state = install.status(_settings(args))
+        if state == "v2":
+            print('armed (v2 hook entry: run "proof arm" again to upgrade)')
+        else:
+            print(state)
+        return 0
     if args.cmd == "verify":
         from proofkit.verdict import run_verify  # added in M2/M4
         return run_verify(transcript=args.transcript, root=args.root,

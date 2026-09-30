@@ -95,3 +95,36 @@ def test_arm_without_session_start_path_leaves_session_start_alone(tmp_path, mon
     settings = tmp_path / ".claude" / "settings.json"
     arm(settings, "/abs/proof_trigger.py")
     assert "SessionStart" not in json.loads(settings.read_text())["hooks"]
+
+
+V2_HINT = 'armed (v2 hook entry: run "proof arm" again to upgrade)'
+
+
+def _status(settings, capsys):
+    sys.path.insert(0, str(Path(PROOF).parent))
+    import proof as proof_cli
+    code = proof_cli.main(["status", "--settings", str(settings)])
+    return code, capsys.readouterr().out.strip()
+
+
+def test_status_flags_v2_stop_entry_without_timeout(tmp_path, capsys):
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [
+        {"type": "command", "command": '"python" "/abs/proof_trigger.py"'}]}]}}), encoding="utf-8")
+    assert _status(settings, capsys) == (0, V2_HINT)
+
+
+def test_status_flags_missing_session_start(tmp_path, capsys):
+    settings = tmp_path / ".claude" / "settings.json"
+    arm(settings, "/abs/proof_trigger.py", timeout=120)
+    assert _status(settings, capsys) == (0, V2_HINT)
+
+
+def test_status_after_v3_arm_is_plain_armed(tmp_path, capsys):
+    settings = tmp_path / ".claude" / "settings.json"
+    arm(settings, "/abs/proof_trigger.py", session_start_path="/abs/proof_session_start.py",
+        timeout=120)
+    assert _status(settings, capsys) == (0, "armed")
+    disarm(settings)
+    assert _status(settings, capsys) == (0, "disarmed")

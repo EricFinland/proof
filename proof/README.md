@@ -50,7 +50,7 @@ passes.
 ```
 python scripts/proof.py arm        # install the SessionStart and Stop hooks
 python scripts/proof.py disarm     # remove both
-python scripts/proof.py status     # armed | disarmed
+python scripts/proof.py status     # armed | disarmed (or the v2 upgrade hint)
 
 python scripts/proof.py verify --transcript <path.jsonl> --root <repo>
 python scripts/proof.py check "all tests pass" --root <repo> --since origin/main
@@ -60,6 +60,11 @@ python scripts/proof.py stats [--days 7] [--json]
 `verify` and `check` write `proof-report.md`, print the verdict, and exit with
 the codes above. Both accept `--json` and `--since <ref>`; `verify` also takes
 `--session`, `--claim-key`, and `--out-dir`.
+
+**Upgrading from v2:** run `proof arm` again in each project. A v2 Stop hook
+still works, but without the SessionStart hook (approximate baselines) and
+without a hook timeout. `proof status` prints
+`armed (v2 hook entry: run "proof arm" again to upgrade)` until you re-arm.
 
 ## Quick demo
 

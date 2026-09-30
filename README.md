@@ -212,6 +212,13 @@ python /path/to/proof/scripts/proof.py disarm   # remove both hooks
 python /path/to/proof/scripts/proof.py status   # armed | disarmed
 ```
 
+### Upgrading from v2
+
+A v2 `Stop` hook keeps working after you update, but it has no `SessionStart`
+hook (so diffs use an approximate `HEAD` baseline) and no hook timeout. Run
+`proof arm` again in each project to replace it. `proof status` prints
+`armed (v2 hook entry: run "proof arm" again to upgrade)` until you do.
+
 Run a check manually against any transcript:
 
 ```bash
