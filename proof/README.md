@@ -1,4 +1,4 @@
-# <img src="../assets/logo.svg" alt="" width="36" align="top"> Proof (v3.0.0)
+# <img src="https://raw.githubusercontent.com/EricFinland/proof/main/assets/logo.svg" alt="" width="36" align="top"> Proof (v3.0.0)
 
 Proof is a Claude Code skill plus Stop hook that auto-fact-checks completion
 claims made by the agent. When the agent says "tests pass" or "all done, it
