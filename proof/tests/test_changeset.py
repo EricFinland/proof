@@ -111,3 +111,33 @@ def test_subdir_root_scopes_changes(git_repo, tmp_path):
     assert Path(cs.root).resolve() == git_repo.path.resolve()
     whole = changeset.for_claim(git_repo.path, session="s", marker_root=tmp_path / "home")
     assert whole.paths() == ["other/b.py", "root.txt", "sub/a.py"]
+
+
+@pytest.mark.parametrize("key,value", [("diff.noprefix", "true"), ("diff.srcPrefix", "x/"),
+                                       ("diff.dstPrefix", "y/"), ("diff.mnemonicPrefix", "true")])
+def test_user_diff_prefix_config_does_not_drop_lines(git_repo, tmp_path, key, value):
+    git_repo.git("config", key, value)
+    git_repo.write("a/keep.py", "a1\n")
+    git_repo.write("b/keep.py", "b1\n")
+    git_repo.write("top.py", "t1\n")
+    git_repo.commit()
+    b = _base(git_repo, tmp_path)
+    git_repo.write("a/keep.py", "a1\na2\n")
+    git_repo.write("b/keep.py", "B1\n")
+    git_repo.write("top.py", "t1\nt2\n")
+    cs = changeset.compute(git_repo.path, b)
+    assert cs.get("a/keep.py").added == [(2, "a2")]
+    assert cs.get("b/keep.py").removed == [(1, "b1")] and cs.get("b/keep.py").added == [(1, "B1")]
+    assert cs.get("top.py").added == [(2, "t2")]
+
+
+def test_external_diff_and_textconv_config_are_ignored(git_repo, tmp_path):
+    git_repo.write(".gitattributes", "*.py diff=weird\n")
+    git_repo.git("config", "diff.weird.textconv", "false")
+    git_repo.git("config", "diff.external", "false")
+    git_repo.write("m.py", "m1\n")
+    git_repo.commit()
+    b = _base(git_repo, tmp_path)
+    git_repo.write("m.py", "m1\nm2\n")
+    cs = changeset.compute(git_repo.path, b)
+    assert cs.get("m.py").added == [(2, "m2")]

@@ -106,13 +106,15 @@ def compute(root, base, scope=""):
     cur_tree = gitutil.snapshot_tree(root)
     base_tree = gitutil.rev_parse(root, f"{base.commit}^{{tree}}")
     files = {}
-    parts = gitutil.git(root, "diff", "--name-status", "-z", "--no-renames",
+    parts = gitutil.git(root, "diff", "--name-status", "-z", "--no-renames", "--no-ext-diff",
                         base_tree, cur_tree, *spec).split("\0")
     for i in range(0, len(parts) - 1, 2):
         status, path = parts[i], parts[i + 1]
         if status and path and not _ARTIFACT.search(path):
             files[path] = FileChange(path, status[0])
+    # Fixed prefixes, no textconv or external diff, whatever the user's diff config.
     _parse(gitutil.git(root, "diff", "-U0", "--no-color", "--no-renames", "--no-ext-diff",
+                       "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/",
                        base_tree, cur_tree, *spec), files)
     return ChangeSet(base.commit, base.approximate,
                      sorted(files.values(), key=lambda f: f.path), str(root))
