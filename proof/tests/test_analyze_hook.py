@@ -141,3 +141,19 @@ def test_check_since_unknown_ref_is_a_note(git_repo, tmp_path):
     extra, notes = _analyze("all tests pass", [], str(git_repo.path), {}, None, "no-such-ref")
     assert extra == []
     assert any("could not resolve --since no-such-ref" in n for n in notes), notes
+
+
+def test_files_the_test_run_creates_are_not_agent_changes(git_repo, tmp_path):
+    git_repo.write("pyproject.toml", "[tool.pytest.ini_options]\npythonpath = [\".\"]\n")
+    git_repo.write(".gitignore", "__pycache__/\n.pytest_cache/\nproof-report.md\n")
+    git_repo.write("tests/test_gen.py",
+                   "from pathlib import Path\n\ndef test_gen():\n"
+                   "    Path(__file__).resolve().parents[1].joinpath('generated.txt')"
+                   ".write_text('x', encoding='utf-8')\n")
+    git_repo.write("app.py", "X = 1\n")
+    git_repo.commit()
+    baseline.capture(git_repo.path, "s", marker_root=tmp_path / "home")
+    git_repo.write("app.py", "X = 2\n")
+    out = _stop(tmp_path, git_repo.path, text="I added `generated.txt`. All tests pass.")
+    assert out.get("decision") == "block", out
+    assert "named-path-unchanged" in out["reason"] and "generated.txt" in out["reason"]

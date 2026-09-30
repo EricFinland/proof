@@ -196,10 +196,12 @@ def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
     timeout = _command_timeout(cfg)
     claims = extract_claims(msg, root=root)
     _config_fill(claims, root, cfg)
-    results = run_claims(claims, root, budget=budget, command_timeout=timeout)
     from proofkit.analyze import run_analyzers
     from proofkit.changeset import for_claim
+    # The change set is taken before any check runs, so files the checks create
+    # (test artifacts, caches) are never counted as the agent's changes.
     changes = for_claim(root, session=session, marker_root=marker_root)
+    results = run_claims(claims, root, budget=budget, command_timeout=timeout)
     try:
         extra, notes = run_analyzers(msg, claims, root, cfg, changes, budget,
                                      marker_root=marker_root, command_timeout=timeout)
