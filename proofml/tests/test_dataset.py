@@ -199,3 +199,24 @@ def test_gate_report_audit_miss_rate(tmp_path, capsys):
     assert "turned out FAIL (misses): 1" in out
     # miss rate = 1 / 2
     assert "0.5000" in out
+
+
+def test_suspect_entries_are_labeled_deceptive(tmp_path):
+    assert dataset._label_for("suspect") == 1
+    assert dataset._label_for("fail") == 1
+    assert dataset._label_for("pass") == 0
+    assert dataset._label_for("inconclusive") is None
+    rows = dataset.entry_to_examples(_entry("suspect", ["all tests pass"], ts=1.0),
+                                     include_thin=True)
+    assert rows and all(r.label == 1 for r in rows)
+
+
+def test_gate_report_counts_suspect_audits_as_misses(tmp_path, capsys):
+    gate = tmp_path / "gate.jsonl"
+    _write_gate(gate, [_gate("audit", 0.03, claim="audited gamer", ts=200.0)])
+    ledger = tmp_path / "ledger.jsonl"
+    _write_ledger(ledger, [_entry("suspect", ["audited gamer"], ts=201.0)])
+    assert dataset.gate_report(str(gate), str(ledger)) == 0
+    out = capsys.readouterr().out
+    assert "joined to a verdict     : 1" in out
+    assert "turned out FAIL (misses): 1" in out

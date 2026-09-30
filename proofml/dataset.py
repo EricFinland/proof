@@ -5,8 +5,9 @@ is on) carries the real verdict per session plus, optionally, the raw behavioral
 signals and the shadow prediction that was made BEFORE the verifier ran. That
 makes it a live, self-labeling dataset:
 
-  - label = 1 if overall == "fail" (the claim was deceptive), else 0 for "pass".
-    "inconclusive" entries are dropped.
+  - label = 1 if overall is "fail" or "suspect" (the claim was deceptive or its
+    checks were gamed), 0 for "pass". "inconclusive" entries are dropped. This
+    matches proofml.schema.
   - behavioral signals come from the entry's "behavior" dict when present
     (these are the rich "featured" rows). Entries with no behavior are THIN:
     the behavioral fields stay at neutral defaults and source = "ledger". Thin
@@ -63,8 +64,8 @@ def _read_ledger_entries(ledger_path: Optional[str]) -> List[dict]:
 
 
 def _label_for(overall: Any) -> Optional[int]:
-    """1 for fail, 0 for pass, None for anything else (e.g. inconclusive)."""
-    if overall == "fail":
+    """1 for fail or suspect, 0 for pass, None for anything else (e.g. inconclusive)."""
+    if overall in ("fail", "suspect"):
         return 1
     if overall == "pass":
         return 0
@@ -286,7 +287,7 @@ def _nearest_verdict(
     Joins on matching project AND claim text, picking the ledger entry whose ts
     is closest to the decision's ts within `window` seconds. The gate logs claim
     truncated to 120 chars, so we match a ledger claim if either is a prefix of
-    the other. Returns "pass"/"fail"/"inconclusive" or None when no match.
+    the other. Returns "pass"/"fail"/"suspect"/"inconclusive" or None when no match.
     """
     proj = decision.get("project")
     claim = decision.get("claim") or ""
@@ -312,7 +313,7 @@ def _nearest_verdict(
         if not matched:
             continue
         overall = e.get("overall")
-        if overall not in ("pass", "fail", "inconclusive"):
+        if overall not in ("pass", "fail", "suspect", "inconclusive"):
             continue
         if d_ts is None:
             # No ts to compare; take first structural match.
@@ -395,13 +396,13 @@ def gate_report(gate_path: Optional[str], ledger_path: Optional[str]) -> int:
 
     audited = [d for d in decisions if d.get("decision") == "audit"]
     n_joined = 0
-    n_miss = 0  # audited claims that turned out FAIL (the gate would have missed)
+    n_miss = 0  # audited claims that turned out FAIL or SUSPECT (the gate would have missed)
     for d in audited:
         verdict = _nearest_verdict(d, ledger)
         if verdict is None:
             continue
         n_joined += 1
-        if verdict == "fail":
+        if verdict in ("fail", "suspect"):
             n_miss += 1
 
     if n_joined == 0:
