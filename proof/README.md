@@ -1,134 +1,90 @@
-# Proof (v2.0.0)
+# <img src="https://raw.githubusercontent.com/EricFinland/proof/main/assets/logo.svg" alt="" width="36" align="top"> Proof (v3.0.0)
 
-Proof is a Claude Code skill and Stop hook that auto-fact-checks completion
+Proof is a Claude Code skill plus Stop hook that auto-fact-checks completion
 claims made by the agent. When the agent says "tests pass" or "all done, it
-works", Proof fires an independent verifier that runs the real checks and
-returns a strict PASS/FAIL/INCONCLUSIVE verdict with receipts before the
-session ends.
+works", the hook runs the real checks itself, diffs the tree against where the
+session started, and returns a strict PASS / FAIL / SUSPECT / INCONCLUSIVE
+verdict with receipts before the turn is allowed to end.
 
-v2 adds: fix loop with receipts (re-blocks up to `max_fix_cycles` after FAIL),
-`proof check` for agent-agnostic verification, `proof stats` honesty ledger,
-HTTP body assertions and local server boot, full runner support matrix
-(Bun/pnpm/yarn/npm by lockfile, Gradle wrapper, Make, Mix, Composer, .NET),
-`.proof.toml` configuration, `--json` output on verify/check/stats, and
-`--session`/`--out-dir` flags on verify.
+v3 adds: checks run inside the hook, SUSPECT for gamed tests, red-green receipts
+for fix claims, claim-vs-diff checks, pending enforcement so a verification
+cannot be skipped by stopping again, and `--since` for CI.
 
 ## The trust problem
 
-Agents sometimes emit confident-sounding completion claims that are false.
-The agent grades its own work, so self-reported success is unreliable.
-Proof breaks this loop by spawning a separate verifier that assumes every
-claim may be false and trusts only execution output.
+The agent grades its own work, so self-reported success is unreliable. Worse,
+an agent under pressure to go green can make the tests pass without making the
+code work: skip the failing test, delete it, or rig the test command. Proof
+trusts only commands it ran and a diff it computed.
 
-## Install (arm the hook)
+## Verdicts and exit codes
 
-```
-python scripts/proof.py arm
-```
+| Verdict | Exit | Meaning |
+|---|---|---|
+| PASS | 0 | Every check ran and passed, and nothing in the diff undermines it. |
+| FAIL | 1 | A check failed. The receipt is the command and its output. |
+| INCONCLUSIVE | 2 | Nothing could be checked definitively. |
+| SUSPECT | 3 | The checks pass, but the tests were gamed, the fix was never red, or the claim contradicts the diff. |
 
-This adds a `Stop` hook to `.claude/settings.json` that fires
-`proof_trigger.py` at the end of every turn. Remove it with:
-
-```
-python scripts/proof.py disarm
-```
-
-Check current state:
-
-```
-python scripts/proof.py status
-```
+Any FAIL fails the whole verdict. A SUSPECT finding outranks any number of
+passes.
 
 ## How it works
 
-1. The Stop hook (`proof_trigger.py`) reads the Claude Code hook payload
-   from stdin: `{session_id, transcript_path, stop_hook_active}`.
-2. It extracts the last assistant message from the transcript and runs the
-   classifier to detect a completion claim.
-3. If a fresh claim is found (not already verified this session), the hook
-   responds with `{"decision": "block", "reason": <verifier directive>}`,
-   which prevents the session from stopping and injects a prompt that
-   instructs the agent to spawn an independent verifier subagent.
-4. The verifier subagent follows `references/verifier-subagent.md`. It
-   treats the claim as unproven, runs `proof.py verify`, and reports the
-   verdict with command output as evidence.
-5. A per-session recursion guard (`~/.proof/verified.json`) ensures the
-   same claim is never verified twice, preventing infinite loops.
+1. **SessionStart** (`scripts/proof_session_start.py`) snapshots the working
+   tree into `refs/proof/baseline/<session>` with a temporary index. Your index
+   and working tree are never touched.
+2. **Stop** (`scripts/proof_trigger.py`) detects a completion claim and runs the
+   checks in-process under `[verify].inline_budget` seconds (default 90), then
+   the diff analyzers: tamper rules, scope checks, and red-green for fix claims.
+3. FAIL blocks with the receipt inline. SUSPECT blocks once with the findings,
+   then goes to the user as a message if they remain. PASS lets the turn end.
+4. Checks that did not finish, or came back INCONCLUSIVE, are marked pending and
+   handed to an independent verifier subagent (`references/verifier-subagent.md`).
+   If the agent stops again without running `proof.py verify --claim-key ...`,
+   the hook blocks again. Every block in one chain counts toward
+   `[verify].max_fix_cycles` (default 3), so it never loops forever.
 
-The `stop_hook_active` field in the payload is `true` when Claude Code
-itself triggered the stop (e.g., from inside the verifier run). The hook
-no-ops in that case, which prevents the hook from blocking its own spawned
-sub-sessions.
-
-## Verifier strategies
-
-Proof auto-selects strategies based on the claim text:
-
-| Strategy    | Triggered by                                  | How it verifies                              |
-|-------------|-----------------------------------------------|----------------------------------------------|
-| `tests`     | "tests pass", "all tests pass"                | Runs detected test command (pytest, npm test, cargo test, go test) |
-| `build`     | "build is clean/green/passing"                | Runs detected build command (npm run build, cargo build, go build) |
-| `typecheck` | "typecheck", "type-check"                     | Runs supplied command (e.g. tsc --noEmit)    |
-| `lint`      | "linting passes", "lint clean"                | Runs supplied command (e.g. ruff check .)    |
-| `command`   | Explicit command in claim                     | Runs the extracted command, checks exit code |
-| `http`      | URL in claim, "returns 200", "endpoint"       | HTTP GET, checks status code                 |
-| `repro`     | Bug-fix claims with a repro command           | Re-runs the repro command, checks exit code  |
-| `filecheck` | Symbol-addition claims with file + symbol     | Substring search in the target file          |
-
-## Verify CLI
-
-Run the verifier directly against any transcript:
+## Usage
 
 ```
-python scripts/proof.py verify --transcript <path.jsonl> --root <repo_dir>
+python scripts/proof.py arm        # install the SessionStart and Stop hooks
+python scripts/proof.py disarm     # remove both
+python scripts/proof.py status     # armed | disarmed (or the v2 upgrade hint)
+
+python scripts/proof.py verify --transcript <path.jsonl> --root <repo>
+python scripts/proof.py check "all tests pass" --root <repo> --since origin/main
+python scripts/proof.py stats [--days 7] [--json]
 ```
 
-Output:
-- Prints the verdict to stdout: `PASS`, `FAIL`, or `INCONCLUSIVE`
-- Writes `proof-report.md` in the current directory with one section per
-  strategy run: verdict, command, and captured output (up to 3000 chars)
-- Exit codes: `0` = PASS, `1` = FAIL, `2` = INCONCLUSIVE
+`verify` and `check` write `proof-report.md`, print the verdict, and exit with
+the codes above. Both accept `--json` and `--since <ref>`; `verify` also takes
+`--session`, `--claim-key`, and `--out-dir`.
 
-Verdict aggregation rule: any single FAIL makes the overall verdict FAIL.
-All strategies must pass for the overall verdict to be PASS. If no strategy
-fires or all are inconclusive, the verdict is INCONCLUSIVE.
+**Upgrading from v2:** run `proof arm` again in each project. A v2 Stop hook
+still works, but without the SessionStart hook (approximate baselines) and
+without a hook timeout. `proof status` prints
+`armed (v2 hook entry: run "proof arm" again to upgrade)` until you re-arm.
 
-## ASCII verdict markers
-
-The CLI and report use ASCII-safe markers to avoid encoding issues on
-Windows terminals:
-
-- `PASS`
-- `FAIL`
-- `INCONCLUSIVE`
-
-## 10-second demo
-
-1. `cd proof/tests/fixtures/tests_fail`
-2. Ask Claude to "make the tests pass," then have it say "all done, tests pass."
-3. With Proof armed, the Stop hook fires the verifier, which runs pytest and
-   reports: FAIL -- you said tests pass; 1 failed. See proof-report.md.
-
-Or run it directly:
+## Quick demo
 
 ```
-python scripts/proof.py verify \
-  --transcript tests/fixtures/tests_fail/transcript.jsonl \
-  --root tests/fixtures/tests_fail
+python scripts/proof.py check "all tests pass" --root tests/fixtures/tests_fail
 ```
 
-(Create a minimal transcript JSONL with a false claim; see
-`tests/test_end_to_end.py` for a programmatic example.)
+prints `FAIL` with the failing pytest command and exits 1. See
+`tests/test_end_to_end.py` for the full hook-to-verdict flow.
 
-## References
+## More
 
-- `references/hook-setup.md` -- hook wiring, blocking policy, recursion guard
+- `SKILL.md` -- the skill manifest and command reference
+- `references/hook-setup.md` -- both hooks, pending enforcement, chain cap
 - `references/verifier-subagent.md` -- the adversarial verifier prompt
-- `references/verifier-strategies.md` -- per-strategy detection and verdict rules
-- `references/evidence-format.md` -- proof-report.md layout, exit-code mapping, --json schema
+- `references/verifier-strategies.md` -- strategies, tamper rules, scope rules, red-green verdicts
+- `references/evidence-format.md` -- proof-report.md layout, exit codes, --json schema
 - `references/configuration.md` -- .proof.toml full reference
 
 ## Requirements
 
-Python 3.11+, stdlib only. No external dependencies. pytest required only
-for running the test suite.
+Python 3.11+, stdlib only. No external dependencies. git is needed for the
+baseline and diff checks. pytest is required only for running the test suite.

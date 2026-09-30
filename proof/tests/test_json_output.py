@@ -25,7 +25,7 @@ def test_version_flag(tmp_path):
         capture_output=True, text=True,
     )
     assert r.returncode == 0
-    assert "proof 2.0.0" in r.stdout or "proof 2.0.0" in r.stderr
+    assert "proof 3.0.0" in r.stdout or "proof 3.0.0" in r.stderr
 
 
 # ---------------------------------------------------------------------------

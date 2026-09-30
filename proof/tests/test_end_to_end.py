@@ -11,16 +11,20 @@ def test_hook_fires_then_verifier_catches_the_lie(tmp_path):
     # 1) transcript with a false completion claim
     t = tmp_path / "t.jsonl"
     t.write_text(json.dumps({"type": "assistant", "message": {"role": "assistant",
-        "content": [{"type": "text", "text": "All done, tests pass."}]}}))
-    # 2) hook fires and blocks
-    import os
+        "content": [{"type": "text", "text": "All done, tests pass."}]}}), encoding="utf-8")
+    # 2) hook fires inside a copy of the failing repo, runs the checks inline, and
+    #    blocks with the FAIL receipt
+    import os, shutil
+    work = tmp_path / "work"
+    shutil.copytree(FIX_FAIL, work)
     env = dict(os.environ, PROOF_HOME=str(tmp_path / "home"))
     hook = subprocess.run([sys.executable, TRIGGER],
         input=json.dumps({"session_id": "s", "transcript_path": str(t),
                           "stop_hook_active": False}),
-        capture_output=True, text=True, env=env)
+        capture_output=True, text=True, env=env, cwd=str(work))
     decision = json.loads(hook.stdout)
     assert decision["decision"] == "block"
+    assert "FAIL tests" in decision["reason"]
     # 3) verifier runs the real checks against the failing repo
     verify = subprocess.run([sys.executable, PROOF, "verify",
         "--transcript", str(t), "--root", str(FIX_FAIL)],

@@ -64,3 +64,26 @@ def detect_claim(message: str) -> ClaimResult:
             return ClaimResult(False)
     matched = [p for p in CLAIM_PATTERNS if re.search(p, text, re.IGNORECASE)]
     return ClaimResult(bool(matched), matched)
+
+
+FIX_PATTERNS = [
+    r"\b(?:bug|issue|crash|error|problem|regression|failure|leak|typo|test|build)\s+is\s+(?:now\s+)?fixed\b",
+    r"\b(?:it|that|this)\s+is\s+(?:now\s+)?fixed\b",
+    r"\bnow\s+fixed\b",
+    r"\bi['’]?ve\s+fixed\b",
+    r"\bi\s+(?:have\s+)?fixed\s+the\b",
+]
+_CHANGE_EXTRA = [
+    r"\b(?:i['’]?ve|i\s+have|i)\s+(?:added|implemented|created|wrote|introduced)\b",
+    r"\bfeature\s+is\s+complete\b",
+    r"\bis\s+(?:now\s+)?implemented\b",
+]
+
+
+def is_fix_claim(message):
+    return bool(message) and any(re.search(p, message, re.I) for p in FIX_PATTERNS)
+
+
+def is_change_claim(message):
+    return is_fix_claim(message) or (bool(message) and any(
+        re.search(p, message, re.I) for p in _CHANGE_EXTRA))

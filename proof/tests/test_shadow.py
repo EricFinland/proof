@@ -17,7 +17,7 @@ from proofkit import verdict as _verdict
 from proofkit.strategies.base import Result
 
 
-_ORIGINAL_KEYS = {"project", "overall", "n_claims", "fails", "claims", "ts"}
+_ORIGINAL_KEYS = {"project", "overall", "n_claims", "fails", "suspects", "claims", "ts"}
 
 
 def _read_ledger(home: Path):
@@ -29,7 +29,7 @@ def _read_ledger(home: Path):
 def _patch_one_passing_claim(monkeypatch):
     """Make _execute_claims see exactly one passing 'tests' result."""
     def fake_get(strategy):
-        def runner(raw, root=None, command=None, expectation=None):
+        def runner(raw, root=None, command=None, expectation=None, timeout=None):
             return Result("all tests pass", "tests", "pytest -q", "1 passed", "pass")
         return runner
 

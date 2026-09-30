@@ -6,6 +6,7 @@ from proofkit import install
 import proofkit
 
 TRIGGER = str(Path(__file__).resolve().parent / "proof_trigger.py")
+SESSION_START = str(Path(__file__).resolve().parent / "proof_session_start.py")
 
 def _settings(args):
     return Path(args.settings) if args.settings else Path(".claude/settings.json")
@@ -30,11 +31,13 @@ def _cmd_stats(args):
         print("No verifications recorded yet.")
         return 0
 
-    verified = stats["passes"] + stats["fails"]
+    verified = stats["passes"] + stats["fails"] + stats["suspects"]
     rate_pct = round(stats["honesty_rate"] * 100) if stats["honesty_rate"] is not None else 0
-    lies = stats["fails"]
+    lies = stats["fails"] + stats["suspects"]
     lie_word = "lie" if lies == 1 else "lies"
     print(f"Honesty rate: {rate_pct}% ({verified} verified, {lies} {lie_word} caught)")
+    if stats["suspects"] > 0:
+        print(f"Gamed: {stats['suspects']}")
     print(f"Clean streak: {stats['clean_streak']}")
 
     if stats["worst_method"] is not None:
@@ -74,6 +77,10 @@ def main(argv=None):
                    help="Directory to write proof-report.md (default: current dir)")
     v.add_argument("--json", action="store_true", default=False,
                    help="Emit machine-readable JSON instead of ASCII verdict")
+    v.add_argument("--claim-key", default=None, dest="claim_key",
+                   help="Verify the stored claim for this key instead of the last message")
+    v.add_argument("--since", default=None,
+                   help="Ref or commit marking the start of the change to verify")
     st = sub.add_parser("stats")
     st.add_argument("--days", type=int, default=None)
     st.add_argument("--json", action="store_true", default=False)
@@ -83,26 +90,36 @@ def main(argv=None):
     ck.add_argument("--root", default=".")
     ck.add_argument("--json", action="store_true", default=False,
                     help="Emit machine-readable JSON instead of ASCII verdict")
+    ck.add_argument("--since", default=None,
+                    help="Ref or commit marking the start of the change to verify")
     args = ap.parse_args(argv)
 
     if args.cmd == "arm":
-        install.arm(_settings(args), TRIGGER); print("Proof armed."); return 0
+        install.arm(_settings(args), TRIGGER, session_start_path=SESSION_START); print("Proof armed."); return 0
     if args.cmd == "disarm":
         install.disarm(_settings(args)); print("Proof disarmed."); return 0
     if args.cmd == "status":
-        print("armed" if install.is_armed(_settings(args)) else "disarmed"); return 0
+        state = install.status(_settings(args))
+        if state == "v2":
+            print('armed (v2 hook entry: run "proof arm" again to upgrade)')
+        else:
+            print(state)
+        return 0
     if args.cmd == "verify":
         from proofkit.verdict import run_verify  # added in M2/M4
         return run_verify(transcript=args.transcript, root=args.root,
                           out_dir=getattr(args, "out_dir", "."),
                           session_id=getattr(args, "session", None),
-                          as_json=getattr(args, "json", False))
+                          as_json=getattr(args, "json", False),
+                          claim_key=getattr(args, "claim_key", None),
+                          since=getattr(args, "since", None))
     if args.cmd == "stats":
         return _cmd_stats(args)
     if args.cmd == "check":
         from proofkit.verdict import run_check
         return run_check(claim_text=args.claim, root=args.root,
-                         as_json=getattr(args, "json", False))
+                         as_json=getattr(args, "json", False),
+                         since=getattr(args, "since", None))
     return 1
 
 if __name__ == "__main__":

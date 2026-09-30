@@ -139,7 +139,7 @@ def _proof_on_path() -> bool:
 def _verifier_label(ex: Example) -> Optional[int]:
     """Shell out to `proof check --json` and derive a real label for one row.
 
-    Returns 1 (deceptive) if the verifier verdict is "fail", 0 if "pass", and
+    Returns 1 (deceptive) if the verifier verdict is "fail" or "suspect", 0 if "pass", and
     None if the verdict is inconclusive or the call could not be interpreted.
     The claim is passed on stdin so the verifier can evaluate it.
     """
@@ -163,7 +163,7 @@ def _verifier_label(ex: Example) -> Optional[int]:
     if not isinstance(obj, dict):
         return None
     overall = obj.get("overall")
-    if overall == "fail":
+    if overall in ("fail", "suspect"):
         return 1
     if overall == "pass":
         return 0

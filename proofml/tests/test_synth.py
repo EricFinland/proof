@@ -139,3 +139,12 @@ def test_main_writes_roundtrippable_jsonl(tmp_path):
     assert len(loaded) == 30
     assert all(e.source == "synth" for e in loaded)
     assert sum(1 for e in loaded if e.label == 1) == 15
+
+
+def test_verifier_label_treats_suspect_as_deceptive(monkeypatch):
+    class FakeProc:
+        stdout = json.dumps({"overall": "suspect"})
+        stderr = ""
+
+    monkeypatch.setattr(synth.subprocess, "run", lambda *a, **k: FakeProc())
+    assert synth._verifier_label(Example(claim="all tests pass", label=0, source="synth")) == 1

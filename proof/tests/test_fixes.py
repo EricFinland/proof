@@ -98,7 +98,8 @@ def test_directive_quotes_script():
 def test_directive_format_contains_quoted_script():
     """After formatting, the resolved script path must be surrounded by double quotes."""
     from proof_trigger import DIRECTIVE
-    formatted = DIRECTIVE.format(script="/some/path/proof.py", tp="t.jsonl", cwd="/cwd", sid="s1")
+    formatted = DIRECTIVE.format(pending="tests", script="/some/path/proof.py", tp="t.jsonl",
+                                 cwd="/cwd", sid="s1", key="abc123")
     assert '"/some/path/proof.py"' in formatted
 
 
@@ -179,5 +180,8 @@ def test_trigger_directive_contains_out_dir_value(tmp_path):
         tp="/tmp/t.jsonl",
         cwd=cwd,
         sid="sess1",
+        pending="tests",
+        key="abc123",
     )
     assert f'--out-dir "{cwd}"' in rendered
+    assert '--claim-key "abc123"' in rendered
