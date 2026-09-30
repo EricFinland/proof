@@ -101,10 +101,9 @@ V2_HINT = 'armed (v2 hook entry: run "proof arm" again to upgrade)'
 
 
 def _status(settings, capsys):
-    sys.path.insert(0, str(Path(PROOF).parent))
-    import proof as proof_cli
-    code = proof_cli.main(["status", "--settings", str(settings)])
-    return code, capsys.readouterr().out.strip()
+    p = subprocess.run([sys.executable, PROOF, "status", "--settings", str(settings)],
+                       capture_output=True, text=True)
+    return p.returncode, p.stdout.strip()
 
 
 def test_status_flags_v2_stop_entry_without_timeout(tmp_path, capsys):
