@@ -67,3 +67,30 @@ def test_set_pending_demotes_other_pending_in_session(tmp_path):
     assert demoted["last"] is None and demoted["pending"] == []
     # other sessions are untouched
     assert m.pending_entry("s2", root=tmp_path)[0] == m.claim_key(other)
+
+
+LONG = ("Here is a long summary of the work. " * 170) + "All 250 tests pass."
+
+
+def test_long_claim_is_stored_whole_and_still_extracts_tests(tmp_path):
+    from proofkit.extractor import extract_claims
+    assert len(LONG) > 6000
+    m.record_attempt("s", LONG, root=tmp_path)
+    stored = m.get_claim("s", m.claim_key(LONG), root=tmp_path)
+    assert stored == LONG.strip()
+    assert "tests" in {c.strategy for c in extract_claims(stored, root=str(tmp_path))}
+    m.set_pending("s", LONG, ["tests"], root=tmp_path)
+    assert m.get_claim("s", m.claim_key(LONG), root=tmp_path) == LONG.strip()
+
+
+def test_claim_text_is_capped(tmp_path):
+    huge = "x" * 60000 + " All tests pass."
+    m.record_attempt("s", huge, root=tmp_path)
+    assert len(m.get_claim("s", m.claim_key(huge), root=tmp_path)) == 50000
+
+
+def test_record_attempt_by_key_bumps_that_key(tmp_path):
+    m.record_attempt("s", LONG, root=tmp_path)
+    m.record_attempt_by_key("s", m.claim_key(LONG), root=tmp_path)
+    assert m.attempts("s", LONG, root=tmp_path) == 2
+    assert m.get_claim("s", m.claim_key(LONG), root=tmp_path) == LONG.strip()

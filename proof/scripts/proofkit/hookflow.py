@@ -152,7 +152,7 @@ def decide_stop(payload, cwd, marker_root=None):
         if pend:
             key, entry = pend
             if entry.get("attempts", 0) < max_cycles:
-                marker.record_attempt(session, entry.get("claim") or "", root=marker_root)
+                marker.record_attempt_by_key(session, key, root=marker_root)
                 marker.chain_bump(session, root=marker_root)
                 return _block(NOT_RUN + _directive(entry.get("pending", []), tp, cwd,
                                                    session, key))

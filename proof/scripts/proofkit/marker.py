@@ -13,6 +13,9 @@ import hashlib, json
 from pathlib import Path
 
 
+CLAIM_CAP = 50000  # stored claim text; the whole claim so `verify --claim-key` sees all of it
+
+
 def claim_key(message: str) -> str:
     return hashlib.sha256(message.strip().encode("utf-8")).hexdigest()[:16]
 
@@ -76,7 +79,15 @@ def record_attempt(session: str, msg: str, root=None) -> None:
     data = _load(root)
     e = _entry(data, session, claim_key(msg))
     e["attempts"] = e.get("attempts", 0) + 1
-    e["claim"] = msg.strip()[:4000]
+    e["claim"] = msg.strip()[:CLAIM_CAP]
+    _save(data, root)
+
+
+def record_attempt_by_key(session: str, key: str, root=None) -> None:
+    """Increment the attempt counter for a claim key, keeping its stored text."""
+    data = _load(root)
+    e = _entry(data, session, key)
+    e["attempts"] = e.get("attempts", 0) + 1
     _save(data, root)
 
 
@@ -149,7 +160,7 @@ def set_pending(session: str, msg: str, strategies, root=None) -> None:
     e = _entry(data, session, key)
     e["last"] = "pending"
     e["pending"] = list(strategies)
-    e["claim"] = msg.strip()[:4000]
+    e["claim"] = msg.strip()[:CLAIM_CAP]
     _save(data, root)
 
 

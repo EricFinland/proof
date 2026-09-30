@@ -215,3 +215,16 @@ def test_repeated_claim_outside_git_keeps_prior_pass(tmp_path):
     assert _stop(tmp_path, w)["systemMessage"].startswith("Proof: PASS")
     (w / "test_ok.py").write_text("def test_ok():\n    assert 1 == 2\n", encoding="utf-8")
     assert _stop(tmp_path, w) is None
+
+
+def test_pending_reblock_counts_attempts_on_the_long_claim(tmp_path, monkeypatch):
+    monkeypatch.setenv("PROOF_INLINE_BUDGET", "0")
+    home = tmp_path / "home"
+    long_claim = ("Here is a long summary of the work. " * 170) + "All 250 tests pass."
+    w = _work(tmp_path, "tests_pass")
+    assert _stop(tmp_path, w, text=long_claim)["decision"] == "block"
+    out = _stop(tmp_path, w, text="ok, spawning it", active=True)
+    assert "verification was not run" in out["reason"]
+    assert marker.attempts("s1", long_claim, root=home) == 2
+    key, entry = marker.pending_entry("s1", root=home)
+    assert key == marker.claim_key(long_claim) and entry["claim"] == long_claim
