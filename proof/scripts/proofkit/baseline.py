@@ -20,6 +20,17 @@ class Baseline:
     ts: float
 
 
+@dataclass
+class Unresolved:
+    """`--since` named a ref that does not resolve to a commit."""
+    ref: str
+
+    @property
+    def note(self):
+        return (f"could not resolve --since {self.ref}; tamper, scope, and redgreen "
+                "checks skipped")
+
+
 def _home(marker_root=None):
     if marker_root:
         return Path(marker_root)
@@ -82,7 +93,15 @@ def resolve(root, session=None, since=None, marker_root=None):
         top = gitutil.toplevel(root)
         if since:
             c = gitutil.rev_parse(top, f"{since}^{{commit}}")
-            return Baseline(str(top), c, False, time.time()) if c else None
+            if not c:
+                return Unresolved(since)
+            # The change is what this branch did since it left `since`, so a branch
+            # behind `since` does not see its newer commits as deletions.
+            try:
+                mb = gitutil.git(top, "merge-base", c, "HEAD").strip()
+            except gitutil.GitError:
+                mb = ""
+            return Baseline(str(top), mb or c, False, time.time())
         if session:
             b = load(top, session, marker_root)
             if b:

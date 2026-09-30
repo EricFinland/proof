@@ -121,11 +121,13 @@ def compute(root, base, scope=""):
 
 
 def for_claim(root, session=None, since=None, marker_root=None):
+    """The ChangeSet for a claim, None without a git baseline, or a
+    baseline.Unresolved when `since` names no commit."""
     try:
-        from proofkit.baseline import resolve
+        from proofkit.baseline import Unresolved, resolve
         b = resolve(root, session=session, since=since, marker_root=marker_root)
-        if not b:
-            return None
+        if not b or isinstance(b, Unresolved):
+            return b or None
         prefix = gitutil.git(root, "rev-parse", "--show-prefix").strip()
         return compute(b.root, b, scope=prefix)
     except Exception:

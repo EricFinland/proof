@@ -11,6 +11,10 @@ def run_analyzers(msg, claims, root, cfg, changes, budget, marker_root=None,
     if changes is None:
         notes.append("no git baseline: tamper, scope, and redgreen checks skipped")
         return results, notes
+    from proofkit.baseline import Unresolved
+    if isinstance(changes, Unresolved):
+        notes.append(changes.note)
+        return results, notes
     if changes.approximate:
         notes.append("baseline: HEAD (approximate)")
     strategies = {c.strategy for c in claims}

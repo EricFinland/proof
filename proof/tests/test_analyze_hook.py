@@ -116,3 +116,28 @@ def test_suspect_then_explanation_tells_user(git_repo, tmp_path):
                 text="The skip is intentional: test_b hits a flaky external service.")
     assert out is not None and "decision" not in out, out
     assert out["systemMessage"].startswith("Proof: SUSPECT") and "skip-added" in out["systemMessage"]
+
+
+def test_check_since_branch_uses_merge_base(git_repo, tmp_path):
+    _py_repo(git_repo)
+    main = git_repo.git("rev-parse", "--abbrev-ref", "HEAD").strip()
+    git_repo.git("checkout", "-q", "-b", "feature")
+    git_repo.git("checkout", "-q", main)
+    git_repo.write("tests/test_new.py", "def test_new():\n    assert 3 == 3\n")
+    git_repo.commit("main gains a test")
+    git_repo.git("checkout", "-q", "feature")
+    env = dict(os.environ, PROOF_HOME=str(tmp_path / "home"))
+    p = subprocess.run([sys.executable, PROOF, "check", "all tests pass", "--root", str(git_repo.path),
+                        "--since", main, "--json"], capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    payload = json.loads(p.stdout)
+    rules = [f["rule"] for r in payload["results"] for f in r["findings"]]
+    assert "test-file-deleted" not in rules, payload
+    assert p.returncode == 0 and payload["overall"] == "pass", payload
+
+
+def test_check_since_unknown_ref_is_a_note(git_repo, tmp_path):
+    from proofkit.verdict import _analyze
+    _py_repo(git_repo)
+    extra, notes = _analyze("all tests pass", [], str(git_repo.path), {}, None, "no-such-ref")
+    assert extra == []
+    assert any("could not resolve --since no-such-ref" in n for n in notes), notes

@@ -57,8 +57,8 @@ Flags:
 - `--claim-key <key>` verifies the claim text the hook stored under that key
   instead of the transcript's last message. The hook's directive always passes
   it, because after a block the newest message is usually not the claim.
-- `--since <ref>` diffs against a ref or commit instead of the session
-  baseline.
+- `--since <ref>` diffs against the merge-base of that ref or commit and
+  `HEAD` instead of the session baseline.
 - `--json` prints one JSON object instead of ASCII lines.
 
 ## How it works
@@ -100,9 +100,9 @@ python scripts/proof.py check "all tests pass and the build is clean" --root <re
 python scripts/proof.py check "all tests pass" --root <repo> --since origin/main
 ```
 
-`--since` diffs against the given ref, so tamper and scope checks cover a whole
-branch. Exit codes are the same as `verify`. Add `--json` for machine-readable
-output (keys: `overall`, `exit`, `results`, `report`; each result carries
+`--since` diffs against the merge-base of the given ref and `HEAD`, so tamper
+and scope checks cover a whole branch. Exit codes are the same as `verify`. Add
+`--json` for machine-readable output (keys: `overall`, `exit`, `results`, `report`; each result carries
 `findings`). See `references/evidence-format.md` for the full schema.
 
 ## Stats (honesty ledger)

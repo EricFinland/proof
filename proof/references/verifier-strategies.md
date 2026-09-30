@@ -178,7 +178,9 @@ proven by the `redgreen` analyzer and "I added X to Y" is checked by the
 The analyzers compare the current working tree against a baseline commit, the
 first of:
 
-- the ref given with `--since` (for example `origin/main` in CI),
+- the merge-base of `HEAD` and the ref given with `--since` (for example
+  `origin/main` in CI). A ref that does not resolve adds the note
+  `could not resolve --since <ref>` and the analyzers are skipped,
 - the session baseline captured at SessionStart (`refs/proof/baseline/<session>`),
 - `HEAD`, when neither exists. That baseline is approximate, and the report
   says "baseline: HEAD (approximate)". Scope and red-green are skipped on an

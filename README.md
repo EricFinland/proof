@@ -359,8 +359,11 @@ CI or with any coding agent:
 proof check "all tests pass and the build is clean" --root /repo --json
 ```
 
-`--since <ref>` diffs against a ref instead of the session baseline, so the
-tamper and scope checks cover a whole branch. In a pull request pipeline:
+`--since <ref>` diffs against the merge-base of that ref and `HEAD` instead of
+the session baseline, so the tamper and scope checks cover a whole branch, and a
+branch that is behind the ref does not see the ref's newer commits as deletions.
+A ref that does not resolve adds the note `could not resolve --since <ref>` and
+skips the diff checks. In a pull request pipeline:
 
 ```yaml
 - uses: actions/checkout@v4
