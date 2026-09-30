@@ -373,3 +373,13 @@ def test_subdir_project_already_green_is_suspect(git_repo, tmp_path):
     _, r = _run_app(git_repo, tmp_path, b)
     assert r.verdict == "suspect", r.raw_output
     assert r.findings[0].file == "app/tests/test_calc.py"
+
+
+def test_current_tree_env_failure_is_inconclusive_not_fail():
+    spec = redgreen.ReproSpec(["npm", "test"], "claim", ["t"])
+    red = {"code": 1, "output": "Tests: 1 failed", "timed_out": False}
+    for green in ({"code": 127, "output": "command not found: npm", "timed_out": False},
+                  {"code": 1, "output": "/usr/bin/python: No module named pytest", "timed_out": False}):
+        r = redgreen._judge("I fixed it.", spec, "npm test", red, green)
+        assert r.verdict == "inconclusive", r.raw_output
+        assert "current tree could not run the repro (environment)" in r.raw_output

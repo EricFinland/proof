@@ -229,6 +229,9 @@ def _unclean(spec, red):
 
 
 def _judge(claim, spec, cmd, red, green):
+    if _env_failure(green):
+        return Result(claim, "redgreen", cmd, "current tree could not run the repro (environment):\n"
+                      + green["output"][-2000:], "inconclusive", 0.3)
     if green["code"] != 0:
         return Result(claim, "redgreen", cmd, "current tree: repro fails\n" + green["output"][-3000:], "fail")
     why = _unclean(spec, red) if red["code"] != 0 else None

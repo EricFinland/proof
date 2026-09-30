@@ -1,6 +1,7 @@
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, asdict, field
@@ -39,7 +40,27 @@ def split_command(cmd, windows=None):
     return shlex.split(cmd, posix=True)
 
 
+def _resolve_program(cmd, env=None):
+    """On Windows, find argv[0] the way a shell would (PATHEXT: .cmd, .bat, .exe).
+
+    CreateProcess only appends .exe, so shims such as npm.cmd are otherwise not
+    found. A name with a path separator or an extension is left alone, and so is
+    a name that resolves to an .exe, which CreateProcess finds with its own search
+    order.
+    """
+    if os.name != "nt" or not isinstance(cmd, (list, tuple)) or not cmd:
+        return cmd
+    prog = str(cmd[0])
+    if "/" in prog or "\\" in prog or os.path.splitext(prog)[1]:
+        return cmd
+    found = shutil.which(prog, path=env.get("PATH") if env else None)
+    if not found or os.path.splitext(found)[1].lower() in (".exe", ".com"):
+        return cmd
+    return [found] + list(cmd[1:])
+
+
 def run_command(cmd, cwd, timeout=DEFAULT_COMMAND_TIMEOUT, env=None):
+    cmd = _resolve_program(cmd, env)
     try:
         p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
