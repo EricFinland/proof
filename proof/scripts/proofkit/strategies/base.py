@@ -3,6 +3,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, asdict, field
 
@@ -97,6 +98,20 @@ def _close_pipes(p):
 
 
 def run_command(cmd, cwd, timeout=DEFAULT_COMMAND_TIMEOUT, env=None):
+    # Python validates cached bytecode by source mtime (whole seconds) and size,
+    # so a same-size edit made within a second of the last run would execute the
+    # old code. A fresh cache prefix per run forces compilation from source and
+    # keeps __pycache__ out of the user's tree.
+    env = dict(os.environ if env is None else env)
+    prefix = tempfile.mkdtemp(prefix="proof-pycache-")
+    env["PYTHONPYCACHEPREFIX"] = prefix
+    try:
+        return _run(cmd, cwd, timeout, env)
+    finally:
+        shutil.rmtree(prefix, ignore_errors=True)
+
+
+def _run(cmd, cwd, timeout, env):
     cmd = _resolve_program(cmd, env)
     group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
              else {"start_new_session": True})

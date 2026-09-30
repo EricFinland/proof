@@ -1,3 +1,4 @@
+import os
 import sys
 from proofkit.strategies.base import (Budget, Result, run_command, split_command,
                                       verdict_for)
@@ -76,7 +77,7 @@ def test_outcome_unresolved():
 
 def test_run_command_env(tmp_path):
     res = run_command([PY, "-c", "import os; print(os.environ['PROOF_T'])"], cwd=tmp_path,
-                      env={**__import__('os').environ, "PROOF_T": "yes"})
+                      env={**os.environ, "PROOF_T": "yes"})
     assert "yes" in res["output"] and res["timed_out"] is False
 
 
@@ -111,3 +112,18 @@ def test_run_command_kills_tree_when_interrupted(tmp_path, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         run_command([PY, "-c", "import time; time.sleep(30)"], cwd=tmp_path, timeout=60)
     assert len(killed) == 1
+
+
+def test_same_size_edit_in_same_second_is_not_hidden_by_stale_bytecode(tmp_path, monkeypatch):
+    # Python and pytest validate cached bytecode by source mtime (seconds) and
+    # size, so an edit that keeps both would reuse the old compiled test.
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    test_file = tmp_path / "test_ok.py"
+    test_file.write_text("def test_ok():\n    assert 1 == 1\n", encoding="utf-8")
+    st = test_file.stat()
+    assert verify_tests("tests pass", root=tmp_path).verdict == "pass"
+    test_file.write_text("def test_ok():\n    assert 1 == 2\n", encoding="utf-8")
+    os.utime(test_file, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert verify_tests("tests pass", root=tmp_path).verdict == "fail"
+    assert not list(tmp_path.rglob("*.pyc"))
