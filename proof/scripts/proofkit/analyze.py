@@ -1,10 +1,12 @@
 """Run diff-based analyzers for a claim. Analyzer errors never affect verdicts."""
+from proofkit.strategies.base import DEFAULT_COMMAND_TIMEOUT
 
 REPRO_HINT = ("no repro found for this fix claim; add or change a test, or include a "
               "line Repro: `<command>` that failed before the fix")
 
 
-def run_analyzers(msg, claims, root, cfg, changes, budget, marker_root=None):
+def run_analyzers(msg, claims, root, cfg, changes, budget, marker_root=None,
+                  command_timeout=DEFAULT_COMMAND_TIMEOUT):
     results, notes = [], []
     if changes is None:
         notes.append("no git baseline: tamper, scope, and redgreen checks skipped")
@@ -38,5 +40,6 @@ def run_analyzers(msg, claims, root, cfg, changes, budget, marker_root=None):
             notes.append(REPRO_HINT)
         elif spec:
             _safe("redgreen", lambda: redgreen.run(msg, spec, root, changes.base_commit,
-                                                   budget, marker_root=marker_root))
+                                                   budget, marker_root=marker_root,
+                                                   command_timeout=command_timeout))
     return results, notes

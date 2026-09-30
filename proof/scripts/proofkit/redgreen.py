@@ -21,7 +21,8 @@ from proofkit import gitutil
 from proofkit.config import cfg_get
 from proofkit.findings import Finding, suspect_result
 from proofkit.runners import detect_test_cmd
-from proofkit.strategies.base import Budget, Result, run_command, split_command
+from proofkit.strategies.base import (DEFAULT_COMMAND_TIMEOUT, Budget, Result, run_command,
+                                      split_command)
 from proofkit.tamper import is_test_path
 
 MIN_BUDGET = 10.0
@@ -334,7 +335,8 @@ def _sweep(marker_root=None, now=None):
             continue
 
 
-def run(claim, spec, root, base_commit, budget=None, marker_root=None):
+def run(claim, spec, root, base_commit, budget=None, marker_root=None,
+        command_timeout=DEFAULT_COMMAND_TIMEOUT):
     budget = budget or Budget(None)
     try:
         _sweep(marker_root)
@@ -349,7 +351,8 @@ def run(claim, spec, root, base_commit, budget=None, marker_root=None):
     st = {"top": Path(root), "wt": None, "links": []}
     left = False
     try:
-        result = _attempt(claim, spec, cmd, root, base_commit, budget, marker_root, st)
+        result = _attempt(claim, spec, cmd, root, base_commit, budget, marker_root, st,
+                          command_timeout)
     except gitutil.GitError as e:
         result = Result(claim, "redgreen", cmd, f"could not create baseline worktree: {e}", "inconclusive", 0.2)
     except OSError as e:
@@ -370,7 +373,8 @@ def _sub(base, rel):
     return Path(base) / rel if rel else Path(base)
 
 
-def _attempt(claim, spec, cmd, root, base_commit, budget, marker_root, st):
+def _attempt(claim, spec, cmd, root, base_commit, budget, marker_root, st,
+             command_timeout=DEFAULT_COMMAND_TIMEOUT):
     top = gitutil.toplevel(root)
     st["top"] = top
     work = _home(marker_root) / "work"
@@ -386,10 +390,12 @@ def _attempt(claim, spec, cmd, root, base_commit, budget, marker_root, st):
         return Result(claim, "redgreen", cmd, f"baseline has no project directory {spec.cwd!r}",
                       "inconclusive", 0.2)
     st["links"] = _link_deps(green_dir, red_dir)
-    red = run_command(spec.command, cwd=red_dir, timeout=budget.timeout(), env=_py_env(red_dir))
+    red = run_command(spec.command, cwd=red_dir, timeout=budget.timeout(command_timeout),
+                      env=_py_env(red_dir))
     if red.get("timed_out"):
         return Result(claim, "redgreen", cmd, "deferred: baseline run timed out", "deferred", 0.0)
-    green = run_command(spec.command, cwd=green_dir, timeout=budget.timeout(), env=_py_env(green_dir))
+    green = run_command(spec.command, cwd=green_dir, timeout=budget.timeout(command_timeout),
+                        env=_py_env(green_dir))
     if green.get("timed_out"):
         return Result(claim, "redgreen", cmd, "deferred: current run timed out", "deferred", 0.0)
     return _judge(claim, spec, cmd, red, green)

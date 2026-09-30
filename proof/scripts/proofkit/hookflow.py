@@ -24,7 +24,8 @@ DIRECTIVE = (
     "verifier: {pending}. Do NOT stop. Spawn an INDEPENDENT verifier subagent (Task "
     "tool) that follows references/verifier-subagent.md: it must run "
     "`python \"{script}\" verify --transcript \"{tp}\" --root \"{cwd}\" --session "
-    "\"{sid}\" --claim-key \"{key}\" --out-dir \"{cwd}\"`, assume your claims may be "
+    "\"{sid}\" --claim-key \"{key}\" --out-dir \"{cwd}\"` with the Bash tool's maximum "
+    "timeout (600000 ms), assume your claims may be "
     "false, trust only execution output, and report the PASS/FAIL/SUSPECT/"
     "INCONCLUSIVE verdict with receipts. If FAIL, fix the issues and let Proof "
     "re-verify."
@@ -188,19 +189,20 @@ def decide_stop(payload, cwd, marker_root=None):
 
 
 def verify_inline(msg, session, tp, cwd, cfg, budget, marker_root, max_cycles):
-    from proofkit.verdict import _config_fill, finalize, run_claims
+    from proofkit.verdict import _command_timeout, _config_fill, finalize, run_claims
 
     root = str(cwd)
     key = marker.claim_key(msg)
+    timeout = _command_timeout(cfg)
     claims = extract_claims(msg, root=root)
     _config_fill(claims, root, cfg)
-    results = run_claims(claims, root, budget=budget)
+    results = run_claims(claims, root, budget=budget, command_timeout=timeout)
     from proofkit.analyze import run_analyzers
     from proofkit.changeset import for_claim
     changes = for_claim(root, session=session, marker_root=marker_root)
     try:
         extra, notes = run_analyzers(msg, claims, root, cfg, changes, budget,
-                                     marker_root=marker_root)
+                                     marker_root=marker_root, command_timeout=timeout)
     except Exception as e:  # analysis must never stop verification
         extra, notes = [], [f"analysis skipped: {e}"]
     results += extra

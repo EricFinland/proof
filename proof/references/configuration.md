@@ -189,9 +189,14 @@ inline_budget = 45
 
 Per-command timeout, in seconds, for `proof verify` and `proof check`. These
 run outside the hook with no shared budget, so this is the only cap on a single
-command. A command that times out yields a deferred result, which counts as
-INCONCLUSIVE, never FAIL. Inside the Stop hook each command is capped by the
-remaining `inline_budget` instead.
+command. It covers the claim's checks and both red-green repro runs (baseline
+and current tree). A command that times out yields a deferred result, which
+counts as INCONCLUSIVE, never FAIL. Inside the Stop hook each command is capped
+by the smaller of this value and the remaining `inline_budget`.
+
+The verifier subagent runs `proof verify` with the Bash tool's maximum timeout
+(600000 ms, which is 600 seconds). Keep this value small enough that every check
+of one claim finishes inside that window.
 
 - **Type:** integer (seconds)
 - **Default:** `600`

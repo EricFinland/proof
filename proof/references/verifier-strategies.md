@@ -24,9 +24,10 @@ Every command-running strategy shares these rules:
   Windows lone backslashes are preserved) and run without a shell.
 - Exit 0 is PASS. Exit 127 or a missing executable is INCONCLUSIVE. Any other
   non-zero exit is FAIL.
-- A command that hits its timeout is `deferred`, never FAIL. In the Stop hook
-  the timeout is the remaining `[verify].inline_budget`; in `proof verify` and
-  `proof check` it is `[verify].command_timeout` (default 600 seconds).
+- A command that hits its timeout is `deferred`, never FAIL. In `proof verify`
+  and `proof check` the timeout is `[verify].command_timeout` (default 600
+  seconds), for the claim's checks and the red-green repro runs alike. In the
+  Stop hook it is the smaller of that and the remaining `[verify].inline_budget`.
 
 ---
 

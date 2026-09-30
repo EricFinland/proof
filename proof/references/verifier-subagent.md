@@ -14,7 +14,9 @@ unstructured claim). The directive names them.
    where `proof.py` is the absolute path provided in the directive and `<project_root>` is the
    project working directory captured at hook-fire time. Keep `--session` and
    `--claim-key` exactly as given: they select the stored claim and record the
-   verdict so the hook can clear the pending check.
+   verdict so the hook can clear the pending check. Run it with the Bash tool's
+   maximum timeout (600000 ms): the default two minute timeout can cut `verify`
+   off before it records a verdict, which leaves the check pending.
 2. Never re-run `verify` with a different claim, a different `--claim-key`, or
    a rewritten transcript to get a better verdict. The verdict for this claim is
    the one this command produces.

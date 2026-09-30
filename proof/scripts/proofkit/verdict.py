@@ -265,7 +265,8 @@ def _analyze(msg, claims, root, cfg, session_id, since, marker_root=None):
         from proofkit.changeset import for_claim
         from proofkit.strategies.base import Budget
         changes = for_claim(root, session=session_id, since=since, marker_root=marker_root)
-        return run_analyzers(msg, claims, root, cfg, changes, Budget(None))
+        return run_analyzers(msg, claims, root, cfg, changes, Budget(None),
+                             marker_root=marker_root, command_timeout=_command_timeout(cfg))
     except Exception as e:
         return [], [f"analysis skipped: {e}"]
 
